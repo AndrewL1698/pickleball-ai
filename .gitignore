@@ -1,12 +1,22 @@
 # --- Data, videos, model weights (never commit) ---
 data/raw/
 data/processed/
-data/annotations/
+# Annotations: track only small hand-authored JSON label files; ignore everything else
+# (crops, exported frames, generated artifacts) under data/annotations/.
+data/annotations/**
+!data/annotations/**/
+!data/annotations/**/*.json
+# Uppercase variants matter on case-sensitive filesystems (Linux/CI); iPhones export .MOV
 *.mp4
+*.MP4
 *.mov
+*.MOV
 *.m4v
+*.M4V
 *.avi
+*.AVI
 *.mkv
+*.MKV
 *.pt
 *.pth
 *.onnx

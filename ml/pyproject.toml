@@ -1,0 +1,22 @@
+[project]
+name = "pickleball-ml"
+version = "0.1.0"
+description = "Computer-vision pipeline for fixed-camera pickleball match footage"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "lap>=0.5",
+    "networkx>=3.3",
+    "numpy>=2",
+    "opencv-python>=4.10",
+    "pandas>=2.2",
+    "pyarrow>=18",
+    "pyyaml>=6",
+    "ultralytics>=8.3",
+]
+
+[project.scripts]
+pbml = "pickleball_ml.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"

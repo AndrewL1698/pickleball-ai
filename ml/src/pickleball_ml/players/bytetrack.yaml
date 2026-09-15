@@ -1,0 +1,11 @@
+# ByteTrack settings for fixed-camera pickleball footage.
+# Based on ultralytics/cfg/trackers/bytetrack.yaml. Ultralytics sizes the lost-track
+# buffer assuming 30 fps, so track_buffer is in processed frames: at 60 fps source with
+# stride 2, 60 frames keeps a lost track alive for 2 seconds (occlusions at the net).
+tracker_type: bytetrack
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 60
+match_thresh: 0.8
+fuse_score: True
