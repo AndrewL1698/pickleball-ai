@@ -33,8 +33,9 @@ Assume:
 - Doubles pickleball only.
 - One fixed phone camera.
 - Landscape orientation.
+- Main (1x) lens. Ultra-wide (0.5x) lens distortion breaks the planar homography.
 - Camera positioned behind one baseline or elevated behind the court.
-- Entire court remains visible.
+- Entire court remains visible, including the near baseline corners.
 - No camera movement during the match.
 - Standard court dimensions.
 
@@ -100,7 +101,7 @@ Later analytics:
 - SVG/Canvas for interactive court visualization
 
 ### Backend
-- Python
+- Python 3.13, managed with uv
 - FastAPI
 - Pydantic
 - SQLAlchemy or SQLModel
@@ -126,6 +127,7 @@ Later analytics:
 ### Infrastructure
 - Docker / Docker Compose
 - GPU worker may run separately from API server
+- Local development is on Apple Silicon: run ML/CV code natively (PyTorch `mps` device), not inside Docker, because Docker on macOS cannot access the GPU
 
 ## Repository Structure
 
@@ -136,27 +138,33 @@ pickleball-ai/
 ├── apps/
 │   ├── web/                 # Next.js frontend
 │   └── api/                 # FastAPI backend
-├── ml/
-│   ├── court/
-│   ├── players/
-│   ├── ball/
-│   ├── events/
-│   ├── shots/
-│   └── evaluation/
+├── ml/                      # uv workspace member, package `pickleball_ml`
+│   ├── src/pickleball_ml/
+│   │   ├── video/
+│   │   ├── court/
+│   │   ├── players/
+│   │   ├── ball/
+│   │   ├── events/
+│   │   ├── shots/
+│   │   └── evaluation/
+│   └── tests/
 ├── workers/
 │   └── video_processor/
 ├── packages/
 │   └── shared/
 ├── data/
-│   ├── raw/
-│   ├── annotations/
-│   └── processed/
+│   ├── raw/                 # source videos (gitignored)
+│   ├── annotations/         # small hand-authored JSON labels (tracked); anything else ignored
+│   └── processed/           # per-video stage outputs (gitignored)
 ├── scripts/
 ├── docs/
+├── pyproject.toml           # uv workspace root
 ├── docker-compose.yml
 ├── README.md
 └── CLAUDE.md
 ```
+
+Create directories when they are first needed rather than scaffolding empty ones.
 
 Keep research notebooks separate from production inference code.
 
@@ -186,13 +194,25 @@ Preferred early implementation:
 
 Automatic court detection can come later.
 
-Represent court positions in real-world units or normalized coordinates, not only pixels.
+Represent court positions in court coordinates, not only pixels.
 
-Useful standard dimensions:
+Standard dimensions:
 
 - Court width: 20 ft
 - Court length: 44 ft
 - Non-volley zone extends 7 ft from each side of net
+
+Court coordinate system (full spec and calibration landmarks in docs/ARCHITECTURE.md):
+
+- Units: feet.
+- Origin: center of the court, under the net.
+- Y: along the court, Y in [-22, 22], negative on the near half (closer to the camera).
+- X: across the court, X in [-10, 10], positive to the right for someone on the near baseline facing the net.
+- Kitchen lines at Y = ±7; distance behind the kitchen line = |Y| - 7.
+
+Calibrate only with painted ground-plane landmarks. The net is elevated and must not be used as a homography point.
+
+The homography is only valid for points on the ground plane. Player positions use the foot/ground-contact point. An airborne ball projected through the homography lands in the wrong place, so ball court coordinates are only meaningful at bounces unless a 3D trajectory model is added.
 
 ### 3. Player Detection and Tracking
 
@@ -200,16 +220,14 @@ Start with a pretrained person detector.
 
 Track the four players through frames using ByteTrack or BoT-SORT.
 
-Maintain stable logical identities:
+Keep persistent player identity separate from court position:
 
-- near-left
-- near-right
-- far-left
-- far-right
+- Player identity (player 1-4, team A/B, later a user-assigned name) persists for the whole match.
+- Court slot (near-left, near-right, far-left, far-right) is derived per frame from court coordinates.
 
-Then allow user identity assignment later.
+A slot is never an identity: doubles partners swap left/right during play (serve rotation, stacking), and teams switch ends between games.
 
-Do not assume tracker IDs remain perfect. Add logic to recover from ID switches using court side, previous position, appearance, and motion continuity.
+Do not assume tracker IDs remain perfect. Add logic to recover from ID switches using motion continuity, previous position, appearance, and court side within a game.
 
 ### 4. Ball Tracking
 
@@ -225,6 +243,8 @@ Investigate:
 - interpolation across short occlusions
 
 Keep raw ball detections, confidence values, and smoothed positions separately.
+
+Always store ball image coordinates. Store court coordinates only where they are physically meaningful (see Court Detection / Calibration).
 
 ### 5. Rally Segmentation
 
@@ -366,8 +386,12 @@ Major entities:
 - MatchMetric
 - PlayerMetric
 - Insight
+- InsightEvidence
+- ModelRun
 
-See DATA_MODEL.md for details.
+Dense per-frame tracks (PlayerTrackPoint, BallTrackPoint) are stored as Parquet artifacts rather than one SQL row per frame.
+
+See docs/DATA_MODEL.md for details.
 
 ## ML Evaluation
 
@@ -439,26 +463,29 @@ Avoid labeling strategy directly when it can be calculated from lower-level even
 
 ## Development Order
 
+The project is CV-first: prove the vision pipeline on one known video with command-line scripts before building the web/API/database stack (see docs/ROADMAP.md Phase 0).
+
 Follow this order unless there is a strong reason not to:
 
 1. Repository setup
-2. Upload + storage
-3. Match/job database models
-4. Video metadata extraction
-5. Manual court calibration
-6. Player detection/tracking
-7. Top-down player visualization
-8. Ball tracking prototype
-9. Rally segmentation
-10. Match viewer and timeline
-11. Basic analytics
-12. Correction interface
-13. Hit detection
-14. Shot classification
-15. Tactical analytics
-16. LLM coaching summaries
-17. Automatic court detection
-18. Optimization/deployment
+2. Video metadata extraction
+3. Manual court calibration (CLI tool)
+4. Player detection/tracking
+5. Top-down player visualization (rendered debug video)
+6. Ball tracking prototype
+7. Upload + storage
+8. Match/job database models + background jobs
+9. Web match viewer and calibration UI
+10. Rally segmentation
+11. Match timeline
+12. Basic analytics
+13. Correction interface
+14. Hit detection
+15. Shot classification
+16. Tactical analytics
+17. LLM coaching summaries
+18. Automatic court detection
+19. Optimization/deployment
 
 ## Definition of a Strong First Demo
 
@@ -499,6 +526,7 @@ When assisting with this repository:
 - API schemas should be explicit and versionable.
 - Use environment variables for secrets.
 - Never commit uploaded videos, model weights, credentials, or large datasets to Git.
+- Small hand-authored JSON annotations under `data/annotations/` (calibration clicks, evaluation labels) are tracked; generated outputs belong in `data/processed/`.
 - Add README instructions whenever developer setup changes.
 - Prefer small, reviewable commits/features.
 
@@ -507,5 +535,17 @@ When assisting with this repository:
 Build an end-to-end prototype for one known test video:
 
 Video -> manual court calibration -> player tracks -> homography -> animated top-down court.
+
+Shape of the prototype:
+
+- The test clip lives in `data/raw/` (gitignored).
+- Python CLI scripts only: no database, queue, API, or web app yet.
+- Each stage writes its output to `data/processed/<video_name>/` and the next stage reads it, so stages are resumable:
+  1. video metadata
+  2. `calibration.json` + court-line overlay image
+  3. raw person detections/tracks (Parquet, with model version and config)
+  4. filtered court-coordinate player tracks (Parquet)
+  5. side-by-side debug video: original frame with boxes + animated top-down court
+- Geometry and filtering logic have pytest unit tests.
 
 Do not begin strategic coaching until this works reliably.

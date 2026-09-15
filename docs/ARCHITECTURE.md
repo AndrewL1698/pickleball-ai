@@ -11,31 +11,26 @@
                              v
                     +------------------+
                     |     FastAPI      |
-                    +---+----------+---+
-                        |          |
-                        |          +-------------------+
-                        v                              v
-                 +-------------+              +---------------+
-                 | PostgreSQL  |              | Object Storage|
-                 +-------------+              |  Video/Output |
-                                              +---------------+
-                        |
-                        | enqueue
-                        v
-                 +-------------+
-                 | Redis Queue |
-                 +------+------+ 
-                        |
-                        v
-                 +------------------+
-                 | GPU/ML Worker    |
-                 +------------------+
-                   |   |   |   |
-                   |   |   |   +--> Analytics
-                   |   |   +------> Ball / Events
-                   |   +----------> Players
-                   +--------------> Court
+                    +--+------+-----+--+
+                       |      |     |
+          read/write   |      |     |  enqueue job
+          +------------+      |     +-------------+
+          v                   v                   v
+   +-------------+   +----------------+   +-------------+
+   | PostgreSQL  |   | Object Storage |   | Redis Queue |
+   +-------------+   |  Video/Output  |   +------+------+
+          ^          +----------------+          |
+          |                   ^                  | consume
+          |                   |                  v
+          |                   |         +------------------+
+          +-------------------+---------+  GPU/ML Worker   |
+            results/status    artifacts +------------------+
+                                          Court -> Players ->
+                                          Ball -> Events ->
+                                          Analytics
 ```
+
+The worker reads source video from object storage, writes large artifacts (tracks, overlays) back to it, and writes job status, events, and metrics to PostgreSQL.
 
 ## Frontend Responsibilities
 
@@ -98,9 +93,9 @@ Store large artifacts outside PostgreSQL:
 - model weights
 - debug overlays
 - processed clips
-- optional per-frame arrays
+- dense per-frame player and ball tracks (Parquet)
 
-Store references/metadata in PostgreSQL.
+Store references/metadata in PostgreSQL. Sparse, correctable entities (rallies, shots, corrections, metrics, insights) live in PostgreSQL rows.
 
 ## Structured Event Flow
 
@@ -132,7 +127,60 @@ image pixel (x, y) -> court coordinate (X, Y)
 
 Use a projective homography for court-plane positions.
 
-Human body boxes extend vertically outside the court plane, so choose an estimated ground-contact point, generally the midpoint between the feet / bottom center of bounding box.
+### Court Coordinate System
+
+All court positions are stored in feet in a fixed court frame:
+
+- Origin (0, 0): center of the court, directly under the net.
+- Y: along the court, baseline to baseline. Negative Y is the near half (the half closer to the camera).
+- X: across the court, sideline to sideline. Positive X is to the right for someone standing on the near baseline facing the net. For a camera behind the near baseline this is also the camera's right; for an oblique or corner camera, use this definition rather than the image's left/right.
+- Positions outside the lines are valid (players often stand behind the baseline, |Y| > 22).
+
+| Line | Definition |
+|---|---|
+| Sidelines | X = ±10 |
+| Baselines | Y = ±22 |
+| Net | Y = 0 |
+| Non-volley (kitchen) lines | Y = ±7 |
+| Center lines | X = 0, for 7 ≤ \|Y\| ≤ 22 |
+
+Useful identities:
+
+- court side = sign(Y)
+- distance behind own kitchen line = |Y| - 7 (negative means inside the kitchen)
+
+### Calibration Landmarks
+
+Use painted intersections on the ground plane. "Near/far" and "left/right" in landmark names follow the court axes above (near = negative Y, left = negative X). They describe court geometry, not players.
+
+| Landmark | (X, Y) |
+|---|---|
+| near_left_baseline_corner | (-10, -22) |
+| near_center_baseline | (0, -22) |
+| near_right_baseline_corner | (10, -22) |
+| near_left_kitchen | (-10, -7) |
+| near_center_kitchen | (0, -7) |
+| near_right_kitchen | (10, -7) |
+| far_left_kitchen | (-10, 7) |
+| far_center_kitchen | (0, 7) |
+| far_right_kitchen | (10, 7) |
+| far_left_baseline_corner | (-10, 22) |
+| far_center_baseline | (0, 22) |
+| far_right_baseline_corner | (10, 22) |
+
+Rules:
+
+- A homography needs at least 4 points, no 3 of them collinear. Prefer every visible landmark, spread across both halves, and fit with least squares.
+- Do not use the net or net posts. The net is elevated above the court plane.
+- Record the reprojection error (in feet) with every calibration and surface it so bad calibrations can be reviewed.
+- The homography assumes negligible lens distortion. Record with the phone's main (1x) lens.
+
+### Ground Plane Only
+
+The homography is only valid for points on the court plane.
+
+- Players: human body boxes extend vertically out of the court plane, so use an estimated ground-contact point, generally the midpoint between the feet / bottom center of the bounding box.
+- Ball: an airborne ball projected through H appears farther from the camera than it really is. Always store image coordinates. Treat court coordinates as meaningful only at bounces, or once a 3D trajectory model exists.
 
 ## Video Strategy
 
@@ -151,7 +199,7 @@ Every prediction should reference:
 
 - model name
 - model version
-- processing run
+- model run (`ModelRun`)
 - parameters/config
 - creation timestamp
 
@@ -185,6 +233,13 @@ Because uploaded match videos may contain identifiable people:
 - provide video deletion support
 
 ## Deployment Phases
+
+### CV Prototype (current)
+- `pbml` command-line tool from the `ml/` package
+- one test video in `data/raw/`
+- stage outputs as files in `data/processed/<video_name>/`
+- no database, queue, API, or web app
+- runs natively on Apple Silicon using the PyTorch `mps` device (Docker on macOS cannot use the GPU)
 
 ### Local Prototype
 - Next.js dev server

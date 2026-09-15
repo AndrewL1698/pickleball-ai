@@ -21,19 +21,22 @@ Each stage should expose debug visualizations and evaluation metrics.
 ## 1. Court Calibration
 
 ### MVP
-Manual landmark selection + homography.
+Manual landmark selection + homography. Start with a CLI click tool on a single frame; a web calibration UI comes later.
 
 ### Later
 Train/detect court keypoints automatically.
 
-Potential landmarks:
+Landmarks (full list with court coordinates in `ARCHITECTURE.md`):
 
 - four outer corners
-- kitchen-line intersections
-- center-line endpoints
-- net line intersections
+- kitchen-line / sideline intersections
+- center-line endpoints (where the center line meets the kitchen line and the baseline)
 
-Use RANSAC where appropriate when automatic predictions contain outliers.
+Do not use the net or net posts: they are elevated above the court plane and would bias the homography.
+
+Validate every calibration by projecting court lines back onto the frame and recording reprojection error in feet.
+
+Use least squares over all clicked points for manual calibration. Use RANSAC where appropriate when automatic predictions contain outliers.
 
 ## 2. Player Detection
 
@@ -47,9 +50,9 @@ Because the scene contains spectators or adjacent courts, filter detections usin
 
 Useful rules:
 
-- projected ground point must be near playing court
+- projected ground point must be near playing court (allow a margin behind the baselines, where players often stand)
 - select four persistent tracks
-- maintain court-side constraints
+- use court-side constraints within a game (teams switch ends between games)
 
 ## 3. Player Tracking
 
@@ -69,11 +72,20 @@ Challenges:
 
 Additional identity signals:
 
-- near/far court side
+- near/far court side (valid within a game only)
 - appearance embedding
 - previous trajectory
 - jersey color
 - spatial continuity
+
+Identity is not court slot. Left/right position within a team changes during play (serve rotation, stacking), so derive near-left, near-right, far-left, and far-right per frame instead of treating them as player IDs.
+
+Current implementation (Phase 0):
+
+1. Gate detections by court position before tracking. Otherwise ByteTrack's IoU matching can move a far player's ID onto a person on a neighboring court whose box overlaps in the image.
+2. Split tracks where the ground position moves faster than a person can, the box size jumps, or the torso color changes abruptly (the tracker handed the ID to an adjacent partner).
+3. Select which fragments are players with a min-cost network flow per court half (at most two at a time; covered frames rewarded, implausible links penalized).
+4. Assign fragments to partners with Viterbi over time, using torso color profiles per partner, motion continuity, and a penalty for switching a continuous track to the other partner.
 
 ## 4. Ball Tracking
 
@@ -116,7 +128,10 @@ Retain missing values when uncertainty is high rather than creating fabricated t
 
 ## 5. Coordinate Transformation
 
-Convert ball and player ground positions into court coordinates.
+Convert ground-plane positions into court coordinates (feet, origin at net center; see `ARCHITECTURE.md`).
+
+- Players: project the ground-contact point (bottom center of the bounding box).
+- Ball: the homography is only valid when the ball touches the court. Project bounce locations. Do not treat projected airborne positions as court locations; that needs a 3D trajectory estimate.
 
 Benefits:
 

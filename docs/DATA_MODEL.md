@@ -2,6 +2,12 @@
 
 This document gives a conceptual schema. Exact implementation may evolve.
 
+Conventions:
+
+- Court coordinates (`court_x`, `court_y`, `*_court_x`, `*_court_y`) are in feet, using the court coordinate system in `ARCHITECTURE.md` (origin at net center, negative Y on the camera side).
+- Image coordinates are pixels in the source video's display orientation.
+- `model_run_id` references `ModelRun`.
+
 ## User
 
 ```text
@@ -17,9 +23,11 @@ id
 user_id
 name
 recorded_at
-status
+status               # overall lifecycle: uploaded / processing / ready / failed
 created_at
 ```
+
+`Match.status` is the user-facing summary. Per-stage pipeline progress lives in `ProcessingJob`.
 
 ## VideoAsset
 
@@ -30,21 +38,25 @@ storage_key
 filename
 width
 height
-fps
+rotation_degrees     # phone videos often carry rotation metadata
+codec
+fps                  # average; phone video is often variable frame rate
 duration_seconds
 frame_count
 created_at
 ```
+
+Because phone video is often variable frame rate, derive timestamps from decoded frame timestamps, not `frame_number / fps`.
 
 ## ProcessingJob
 
 ```text
 id
 match_id
-stage
-status
+stage                # INGESTED / METADATA_READY / COURT_READY / ...
+status               # queued / running / succeeded / failed
 progress
-model_version
+model_run_id         # nullable; model details live in ModelRun
 error_message
 started_at
 completed_at
@@ -56,10 +68,12 @@ completed_at
 id
 match_id
 source              # manual / model
-image_points_json
-court_points_json
+frame_number        # frame the landmarks were placed on
+image_points_json   # keyed by landmark name
+court_points_json   # keyed by landmark name, feet
 homography_json
-confidence
+reprojection_error_ft
+confidence          # nullable for manual calibrations
 created_at
 ```
 
@@ -68,44 +82,54 @@ created_at
 ```text
 id
 match_id
-team                 # near / far
-position_slot        # optional initial slot
+team                 # A / B, a persistent team identity
 name                 # optional user-assigned name
 is_user
 ```
 
+Do not store court side or slot (near-left, far-right, ...) on `Player`. Teams switch ends between games and partners swap left/right during play, so side and slot are derived per frame from court coordinates.
+
 ## PlayerTrackPoint
 
+Stored as a Parquet artifact per model run (one row per player per frame), not as SQL rows. Four players at 30 fps for an hour is about 430k rows per match.
+
 ```text
-id
 match_id
-player_id
+model_run_id
 frame_number
 timestamp_ms
-image_x
+track_id             # raw tracker ID
+segment_id           # track split where position, box size, or clothing color jumps
+player_id            # nullable until identity is resolved
+identity_confident   # false when the alternative partner assignment was nearly as good
+image_x              # ground-contact point
 image_y
+bbox_x1
+bbox_y1
+bbox_x2
+bbox_y2
 court_x
 court_y
 confidence
-processing_run_id
 ```
 
-For scale, this table may eventually move to a more compact representation or columnar artifact rather than one SQL row per frame.
+Keep raw tracker output (`track_id`) and resolved identity (`player_id`) separate, so identity logic can be rerun without re-detecting.
 
 ## BallTrackPoint
 
+Stored as a Parquet artifact per model run.
+
 ```text
-id
 match_id
+model_run_id
 frame_number
 timestamp_ms
-image_x
+image_x              # nullable when not detected
 image_y
-court_x
+court_x              # nullable; only meaningful when the ball is on the ground (see ARCHITECTURE.md)
 court_y
 confidence
 is_interpolated
-processing_run_id
 ```
 
 ## Rally
@@ -118,9 +142,10 @@ start_frame
 end_frame
 start_timestamp_ms
 end_timestamp_ms
-serving_team
-winner_team
+serving_team         # A / B
+winner_team          # A / B
 confidence
+model_run_id
 ```
 
 ## Shot
@@ -142,7 +167,7 @@ landing_court_x
 landing_court_y
 speed_mph
 was_bounce_detected
-processing_run_id
+model_run_id
 ```
 
 Prefer deriving `resolved_shot_type` in application logic/view from prediction + corrections instead of duplicating it if possible.
@@ -156,7 +181,7 @@ id
 user_id
 match_id
 entity_type          # rally / shot / player_track / etc.
-entity_id
+entity_id            # row ID; for Parquet tracks use a locator such as model_run_id + frame_number + track_id
 field_name
 original_value_json
 corrected_value_json
@@ -223,11 +248,12 @@ stage
 model_name
 model_version
 config_json
+artifact_storage_key # nullable; Parquet/overlay outputs for this run
 started_at
 completed_at
 ```
 
-Prediction rows should reference a model run when practical.
+Every prediction (SQL row or Parquet artifact) should reference a model run.
 
 ## Key Design Rule
 
