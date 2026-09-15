@@ -1,0 +1,48 @@
+[project]
+name = "pickleball-ai"
+version = "0.1.0"
+description = "Pickleball match intelligence monorepo"
+requires-python = ">=3.13,<3.14"
+dependencies = ["pickleball-ml"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pandas-stubs>=2.2",
+    "pytest>=8",
+    "ruff>=0.8",
+    "types-networkx>=3.3",
+    "types-pyyaml>=6",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["ml"]
+
+[tool.uv.sources]
+pickleball-ml = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["ml/tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pickleball_ml"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["ml/src"]
+
+[[tool.mypy.overrides]]
+module = ["ultralytics", "ultralytics.*", "torch", "torch.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
