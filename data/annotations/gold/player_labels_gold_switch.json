@@ -1,0 +1,718 @@
+{
+  "schema": "pbml.player_labels/v1",
+  "clip": "gold",
+  "window": "gold_switch",
+  "video": "data/raw/Gold Medal Match Pickleball Senior Mixed Doubles 3.5 60-65 Gold Medal Match Fall Brawl.mp4",
+  "annotator": "claude (visual review of exported frames and crops)",
+  "created_at": "2026-09-22T19:09:22.451085+00:00",
+  "people": {
+    "A_man": "team A man: navy short-sleeve shirt, white shorts, white hair",
+    "A_woman": "team A woman: lavender top, patterned white shorts, visor",
+    "B_man": "team B man: pink/orange patterned shirt, pink shorts",
+    "B_woman": "team B woman: light-blue tank top, black shorts, black knee sleeves"
+  },
+  "instructions": "For every court player visible in the frame add {'person': <name>, 'candidate': <id>}; if the player is visible but has no candidate box, add {'person': <name>, 'box': null}. Leave players that are not visible out. Name the four people in 'people' by clothing, not by predicted ID.",
+  "frames": [
+    {
+      "frame_number": 22800,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            406.0,
+            472.6,
+            586.4,
+            1018.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1100.2,
+            487.3,
+            1225.2,
+            828.1
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            826.7,
+            478.5,
+            910.7,
+            601.0
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            987.1,
+            497.5,
+            1046.5,
+            602.9
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 23250,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1299.2,
+            483.4,
+            1538.9,
+            1075.5
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1008.3,
+            479.9,
+            1048.2,
+            603.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            786.9,
+            465.6,
+            821.5,
+            551.1
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            33.2,
+            440.0,
+            320.2,
+            1075.4
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 3
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 23700,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            738.3,
+            464.8,
+            799.8,
+            640.8
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            846.0,
+            464.5,
+            896.7,
+            644.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            927.2,
+            480.0,
+            967.9,
+            607.7
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            512.6,
+            471.7,
+            561.8,
+            634.3
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_woman",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 24150,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            618.8,
+            475.2,
+            668.6,
+            614.0
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1257.0,
+            477.3,
+            1305.1,
+            617.4
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    },
+    {
+      "frame_number": 24600,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            990.5,
+            478.1,
+            1027.5,
+            590.2
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1288.1,
+            473.9,
+            1351.5,
+            623.0
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    },
+    {
+      "frame_number": 25050,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1130.7,
+            471.0,
+            1177.8,
+            597.8
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1092.0,
+            470.4,
+            1142.1,
+            598.8
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1065.5,
+            478.9,
+            1107.1,
+            594.6
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    },
+    {
+      "frame_number": 25500,
+      "split": "tune",
+      "candidates": [],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    },
+    {
+      "frame_number": 25950,
+      "split": "tune",
+      "candidates": [],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    },
+    {
+      "frame_number": 26400,
+      "split": "tune",
+      "candidates": [],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    },
+    {
+      "frame_number": 26850,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            816.7,
+            483.4,
+            858.4,
+            628.3
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    },
+    {
+      "frame_number": 27300,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            778.2,
+            476.6,
+            826.3,
+            628.4
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            986.6,
+            469.8,
+            1014.1,
+            565.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            846.0,
+            464.6,
+            885.6,
+            562.4
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            918.7,
+            652.0,
+            1484.3,
+            1076.1
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    },
+    {
+      "frame_number": 27750,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            821.0,
+            463.3,
+            883.0,
+            643.8
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            912.9,
+            480.8,
+            966.0,
+            640.3
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            780.1,
+            472.7,
+            826.1,
+            627.3
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            906.9,
+            466.8,
+            948.5,
+            621.2
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    },
+    {
+      "frame_number": 28200,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            763.8,
+            463.4,
+            839.2,
+            694.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            973.2,
+            480.4,
+            1024.7,
+            669.6
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            761.5,
+            473.1,
+            795.6,
+            624.0
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    },
+    {
+      "frame_number": 28650,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            790.2,
+            473.8,
+            835.4,
+            629.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            991.6,
+            470.3,
+            1022.1,
+            567.4
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            664.0,
+            458.5,
+            728.0,
+            715.3
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            916.8,
+            468.5,
+            952.1,
+            553.4
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    },
+    {
+      "frame_number": 29100,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            807.1,
+            489.1,
+            940.5,
+            689.1
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            999.2,
+            490.5,
+            1087.1,
+            699.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            838.8,
+            473.6,
+            883.0,
+            579.2
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            988.5,
+            495.4,
+            1028.5,
+            552.9
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            967.6,
+            495.4,
+            1029.0,
+            593.2
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 2
+        },
+        {
+          "person": "A_woman",
+          "candidate": 3
+        },
+        {
+          "person": "B_man",
+          "candidate": 0
+        },
+        {
+          "person": "B_woman",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 29550,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1295.2,
+            514.2,
+            1536.7,
+            1077.1
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            549.5,
+            459.7,
+            704.2,
+            813.2
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            999.8,
+            471.3,
+            1058.6,
+            604.4
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            813.4,
+            464.4,
+            846.5,
+            564.9
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 3
+        },
+        {
+          "person": "A_woman",
+          "candidate": 2
+        },
+        {
+          "person": "B_man",
+          "candidate": 1
+        },
+        {
+          "person": "B_woman",
+          "candidate": 0
+        }
+      ]
+    },
+    {
+      "frame_number": 30000,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            241.4,
+            450.2,
+            433.4,
+            888.0
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            788.7,
+            468.8,
+            819.4,
+            572.2
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1001.4,
+            489.3,
+            1029.7,
+            553.6
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 1
+        },
+        {
+          "person": "A_woman",
+          "candidate": 2
+        },
+        {
+          "person": "B_man",
+          "candidate": 0
+        }
+      ]
+    },
+    {
+      "frame_number": 30450,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            691.3,
+            482.6,
+            822.6,
+            688.0
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1018.0,
+            497.3,
+            1094.2,
+            706.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            961.2,
+            480.1,
+            1020.6,
+            592.5
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            723.8,
+            482.4,
+            772.8,
+            599.0
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "changeover or transition: the court is empty, the players are walking between ends, or people meeting at the net cannot be told apart from officials"
+    }
+  ],
+  "notes": "Gold window straddling the game break at 820-950 s. Team A is near before the break and far after it. Only frames with recognisable play are labeled; frames during the changeover are marked skip, so this file measures whether identity survives the end switch rather than what happens while nobody is playing."
+}

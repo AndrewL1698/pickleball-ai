@@ -30,6 +30,8 @@ testpaths = ["ml/tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py313"
+# Vendored third-party model definition, kept close to upstream (see its module docstring).
+extend-exclude = ["ml/src/pickleball_ml/ball/wasb_hrnet.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
@@ -41,6 +43,10 @@ known-first-party = ["pickleball_ml"]
 python_version = "3.13"
 strict = true
 files = ["ml/src"]
+
+[[tool.mypy.overrides]]
+module = ["pickleball_ml.ball.wasb_hrnet"]
+ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = ["ultralytics", "ultralytics.*", "torch", "torch.*"]

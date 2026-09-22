@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from pickleball_ml.players.appearance import DESCRIPTOR_SIZE
 from pickleball_ml.players.identity import (
@@ -37,9 +38,11 @@ def walk(track_id: int, frames: range, start: tuple[float, float], end: tuple[fl
     return rows
 
 
-def resolve(rows: list[dict[str, object]]) -> pd.DataFrame:
+def resolve(rows: list[dict[str, object]], end_switch_frames: tuple[int, ...] = ()
+            ) -> pd.DataFrame:
     players, _ = resolve_identities(pd.DataFrame(rows, columns=RAW_COLUMNS), FPS, STRIDE,
-                                       frame_height=1080, config=CONFIG)
+                                    frame_height=1080, config=CONFIG,
+                                    end_switch_frames=end_switch_frames)
     return players
 
 
@@ -104,7 +107,9 @@ def test_clothing_color_resolves_who_is_who_after_both_leave_frame() -> None:
 def test_identities_are_numbered_by_team() -> None:
     players = resolve(four_players(range(0, 100, STRIDE)))
     teams = players.groupby("player_id")["team"].first().to_dict()
-    assert teams == {1: "near", 2: "near", 3: "far", 4: "far"}
+    assert teams == {1: "A", 2: "A", 3: "B", 4: "B"}
+    sides = players.groupby("player_id")["side"].first().to_dict()
+    assert sides == {1: "near", 2: "near", 3: "far", 4: "far"}
     slots = players.groupby("track_id")["slot"].first().to_dict()
     assert slots == {1: "near_left", 2: "near_right", 3: "far_left", 4: "far_right"}
 
@@ -158,3 +163,46 @@ def test_many_short_fragments_do_not_hide_the_true_continuation() -> None:
 def test_untracked_detections_are_ignored() -> None:
     rows = walk(-1, range(0, 40, STRIDE), (0, -10), (0, -10), shirt=1)
     assert resolve(rows).empty
+
+
+def teams_switch_ends(switch: int, end: int) -> list[dict[str, object]]:
+    """Game 1: shirts 1-2 near, 3-4 far. Game 2: the teams have changed ends, and the
+    partners of each team also swapped left/right. New tracker IDs after the break."""
+    game1 = range(0, switch - 100, STRIDE)
+    game2 = range(switch + 100, end, STRIDE)
+    return (walk(1, game1, (-5, -15), (-5, -15), shirt=1)
+            + walk(2, game1, (5, -15), (5, -15), shirt=2)
+            + walk(3, game1, (-5, 12), (-5, 12), shirt=3)
+            + walk(4, game1, (5, 12), (5, 12), shirt=4)
+            + walk(11, game2, (-5, 12), (-5, 12), shirt=2)
+            + walk(12, game2, (5, 12), (5, 12), shirt=1)
+            + walk(13, game2, (-5, -15), (-5, -15), shirt=4)
+            + walk(14, game2, (5, -15), (5, -15), shirt=3))
+
+
+def shirts_by_player(players: pd.DataFrame) -> dict[int, set[int]]:
+    shirt_of_track = {1: 1, 2: 2, 3: 3, 4: 4, 11: 2, 12: 1, 13: 4, 14: 3}
+    shirts = players["track_id"].map(shirt_of_track)
+    return {int(k): set(v) for k, v in shirts.groupby(players["player_id"])}
+
+
+def test_end_switch_keeps_player_identity_and_team() -> None:
+    players = resolve(teams_switch_ends(1000, 2000), end_switch_frames=(1000,))
+    assert shirts_by_player(players) == {1: {1}, 2: {2}, 3: {3}, 4: {4}}
+    team_a = players[players["team"] == "A"]
+    assert set(team_a.loc[team_a["frame_number"] < 1000, "side"]) == {"near"}
+    assert set(team_a.loc[team_a["frame_number"] >= 1000, "side"]) == {"far"}
+    assert set(players.loc[players["side"] == "far", "slot"]) <= {"far_left", "far_right"}
+    assert players["tracklet_id"].groupby(players["frame_number"] >= 1000).apply(set).pipe(
+        lambda s: s[False].isdisjoint(s[True]))
+
+
+def test_without_the_switch_input_the_teams_are_mixed_up() -> None:
+    # Documents the limitation the manual end-switch input exists for.
+    players = resolve(teams_switch_ends(1000, 2000))
+    assert shirts_by_player(players) != {1: {1}, 2: {2}, 3: {3}, 4: {4}}
+
+
+def test_end_switch_outside_the_window_is_rejected() -> None:
+    with pytest.raises(ValueError, match="outside"):
+        resolve(four_players(range(0, 100, STRIDE)), end_switch_frames=(5000,))

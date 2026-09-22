@@ -1,0 +1,234 @@
+{
+  "name": "phase0b",
+  "description": "Phase 0b broader feasibility: four fixed behind-baseline doubles recordings, staged sample windows, player tracking and a first ball-tracking baseline. Windows marked 'tune' are the ones configuration was looked at on; 'test' windows and the whole pro63 clip are held out.",
+  "tracking": {
+    "model": "weights/yolo26m.pt",
+    "imgsz": 1280,
+    "conf": 0.2,
+    "device": "mps",
+    "stride": 2,
+    "render_seconds": 60.0,
+    "identity": {}
+  },
+  "ball": {
+    "detector": "wasb",
+    "weights": "weights/wasb/wasb_tennis_best.pth.tar",
+    "device": "mps",
+    "score_threshold": 0.05,
+    "max_candidates": 5,
+    "target_fps": 30.0,
+    "render_seconds": 30.0,
+    "track": {}
+  },
+  "clips": {
+    "gold": {
+      "video": "data/raw/Gold Medal Match Pickleball Senior Mixed Doubles 3.5 60-65 Gold Medal Match Fall Brawl.mp4",
+      "description": "Senior mixed doubles 3.5, 60-65 gold medal match. Outdoor, sunny, adjacent courts and bleachers in view. 78.6 min, the long recording. Camera low and centred behind the near baseline; the near-left baseline corner is outside the frame.",
+      "role": "tune",
+      "quality": "good light, low camera, far half strongly foreshortened",
+      "segments": [
+        {
+          "id": "main",
+          "points": "data/annotations/gold/calibration_points.json",
+          "background": [
+            120,
+            300
+          ],
+          "start_s": 0,
+          "end_s": 4714,
+          "notes": "No camera jump above 6 px between 5 s samples over the whole recording."
+        }
+      ]
+    },
+    "buzz": {
+      "video": "data/raw/The Better Buzz San Diego Open - 5.0 Men's Doubles - Pinoy Pickleball International (1080p).mp4",
+      "description": "5.0 men's doubles, outdoor tournament, 14.7 min. Camera centred and elevated behind the near baseline; whole court including both near corners visible.",
+      "role": "tune",
+      "quality": "excellent",
+      "segments": [
+        {
+          "id": "main",
+          "points": "data/annotations/buzz/calibration_points.json",
+          "background": [
+            60,
+            240
+          ],
+          "start_s": 10,
+          "end_s": 880,
+          "notes": "The camera is still being placed for the first ~8 s; everything after is stationary."
+        }
+      ]
+    },
+    "riggs": {
+      "video": "data/raw/Unedited Pickleball Match Men's Doubles Game 5 Rec Play 2025-7-5 - Riggs Pickleball (1080p).mp4",
+      "description": "Men's doubles rec play, indoor, 15.4 min. Wide-angle camera behind the near baseline but offset to the right and rolled. The camera is moved once, at 6:08.",
+      "role": "tune",
+      "quality": "good, wide angle, laterally offset",
+      "segments": [
+        {
+          "id": "cam1",
+          "points": "data/annotations/riggs/calibration_points_cam1.json",
+          "background": [
+            30,
+            330
+          ],
+          "start_s": 0,
+          "end_s": 366,
+          "notes": "First camera position; moved by ~104 px at 368 s."
+        },
+        {
+          "id": "cam2",
+          "points": "data/annotations/riggs/calibration_points_cam2.json",
+          "background": [
+            400,
+            900
+          ],
+          "start_s": 372,
+          "end_s": 918,
+          "notes": "Second camera position, stable until a final move at 920 s."
+        }
+      ]
+    },
+    "pro63": {
+      "video": "data/raw/Pickleball Pro Men's Doubles WITH Commentary from a 6.3 DUPR - Kevin Dong Pickleball (1080p).mp4",
+      "description": "6.3 DUPR men's doubles with commentary, indoor, 21 min. Held-out hard condition: fast play, softer image, burned-in scoreboard, spectators along the bottom edge. Camera elevated and offset behind the near baseline; the far baseline is hidden behind the net tape.",
+      "role": "holdout",
+      "quality": "hard: softer image, fastest play",
+      "segments": [
+        {
+          "id": "main",
+          "points": "data/annotations/pro63/calibration_points.json",
+          "background": [
+            600,
+            900
+          ],
+          "start_s": 0,
+          "end_s": 1256,
+          "notes": "Stationary throughout: median drift 0.5 px against the first frame."
+        }
+      ]
+    }
+  },
+  "windows": [
+    {
+      "id": "gold_early",
+      "clip": "gold",
+      "camera": "main",
+      "start_s": 120,
+      "end_s": 300,
+      "stride": 1,
+      "split": "tune",
+      "purpose": "Early play, team A on the near side. Primary tuning window for the long recording.",
+      "ball": {
+        "start_s": 150,
+        "end_s": 210
+      },
+      "player_labels": "data/annotations/gold/player_labels_gold_early.json"
+    },
+    {
+      "id": "gold_switch",
+      "clip": "gold",
+      "camera": "main",
+      "start_s": 760,
+      "end_s": 1020,
+      "stride": 1,
+      "split": "tune",
+      "purpose": "Straddles the game break at 820-950 s: the teams change ends and play resumes with team B near. Tests end-switch handling.",
+      "end_switches_s": [
+        950
+      ],
+      "player_labels": "data/annotations/gold/player_labels_gold_switch.json"
+    },
+    {
+      "id": "gold_mid",
+      "clip": "gold",
+      "camera": "main",
+      "start_s": 2400,
+      "end_s": 2580,
+      "stride": 1,
+      "split": "test",
+      "purpose": "Middle of the match, held out from tuning.",
+      "player_labels": "data/annotations/gold/player_labels_gold_mid.json"
+    },
+    {
+      "id": "gold_late",
+      "clip": "gold",
+      "camera": "main",
+      "start_s": 4320,
+      "end_s": 4500,
+      "stride": 1,
+      "split": "test",
+      "purpose": "Late in the 78 min recording, lower sun and long shadows. Held out.",
+      "player_labels": "data/annotations/gold/player_labels_gold_late.json"
+    },
+    {
+      "id": "buzz_a",
+      "clip": "buzz",
+      "camera": "main",
+      "start_s": 60,
+      "end_s": 240,
+      "split": "tune",
+      "purpose": "Best-quality centred camera; primary tuning window and first ball-tracking window.",
+      "ball": {
+        "start_s": 90,
+        "end_s": 150
+      },
+      "player_labels": "data/annotations/buzz/player_labels_buzz_a.json",
+      "ball_labels": "data/annotations/buzz/ball_labels_buzz_a.json"
+    },
+    {
+      "id": "buzz_b",
+      "clip": "buzz",
+      "camera": "main",
+      "start_s": 540,
+      "end_s": 720,
+      "split": "test",
+      "purpose": "Later in the same match, held out from tuning.",
+      "ball": {
+        "start_s": 570,
+        "end_s": 630
+      },
+      "player_labels": "data/annotations/buzz/player_labels_buzz_b.json",
+      "ball_labels": "data/annotations/buzz/ball_labels_buzz_b.json"
+    },
+    {
+      "id": "riggs_a",
+      "clip": "riggs",
+      "camera": "cam1",
+      "start_s": 60,
+      "end_s": 240,
+      "split": "tune",
+      "purpose": "Laterally offset, rolled wide-angle camera (first position).",
+      "ball": {
+        "start_s": 90,
+        "end_s": 150
+      },
+      "player_labels": "data/annotations/riggs/player_labels_riggs_a.json"
+    },
+    {
+      "id": "riggs_b",
+      "clip": "riggs",
+      "camera": "cam2",
+      "start_s": 600,
+      "end_s": 780,
+      "split": "test",
+      "purpose": "Second camera position of the same match: tests that a moved camera needs, and gets, its own calibration.",
+      "player_labels": "data/annotations/riggs/player_labels_riggs_b.json"
+    },
+    {
+      "id": "pro63_hard",
+      "clip": "pro63",
+      "camera": "main",
+      "start_s": 720,
+      "end_s": 900,
+      "split": "test",
+      "purpose": "Held-out hard condition: 6.3 DUPR play, softer image, spectators along the bottom edge.",
+      "ball": {
+        "start_s": 750,
+        "end_s": 810
+      },
+      "player_labels": "data/annotations/pro63/player_labels_pro63_hard.json",
+      "ball_labels": "data/annotations/pro63/ball_labels_pro63_hard.json"
+    }
+  ]
+}
