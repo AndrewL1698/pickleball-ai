@@ -161,6 +161,17 @@ Point a window's `player_labels` / `ball_labels` at the filled files and the
 coverage, and pixel error at several tolerances, split into tuning and held-out
 windows.
 
+Label honestly or the metrics are worthless:
+
+- Name people by what they are wearing, never by the predicted ID. The player
+  export deliberately hides predictions.
+- List every court player visible in a frame. A player you leave out counts as
+  "not visible", which silently inflates coverage.
+- If you cannot tell two players apart in a frame, mark the frame `"skip": true`
+  rather than guessing. Guesses show up as tracker errors that are really yours.
+- For the ball, `absent` is a claim that the ball is not visible, not that you
+  did not find it; use `unsure` when you are not certain.
+
 ## Initial Recording Constraints
 
 MVP footage should be:
