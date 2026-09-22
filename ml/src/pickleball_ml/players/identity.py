@@ -30,8 +30,16 @@ Which partner is which (assignment)
 Teams switch ends between games. The window is cut at manually supplied
 end-switch frames, each game segment is resolved independently as above, and
 players are then linked across each switch: the team that was near is now far,
-and which partner is which is decided by clothing color. Player identity and
-team (A/B) persist across the window; side (near/far) and slot are per frame.
+and which partner is which is decided by clothing color plus any tracker IDs
+that survived the changeover. Player identity and team (A/B) persist across the
+window; side (near/far) and slot are per frame.
+
+Confidence has two parts, because they fail independently. `identity_margin` is
+the cost gap of the partner assignment inside a segment. `switch_link_margin`
+is the gap between the chosen cross-switch pairing and the alternative, which
+is the number that collapses when both teams wear the same kit. A row is only
+`identity_confident` when both clear their thresholds, so a segment that is
+internally clean but joined by a coin flip does not claim to be certain.
 """
 
 from collections.abc import Sequence
