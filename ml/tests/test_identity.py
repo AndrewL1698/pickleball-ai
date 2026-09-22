@@ -230,3 +230,27 @@ def test_end_switch_uses_tracker_continuity_when_the_teams_wear_the_same_kit() -
     for track_id in (1, 2):
         assert (set(before.loc[before["track_id"] == track_id, "player_id"])
                 == set(kept.loc[kept["track_id"] == track_id, "player_id"]))
+
+
+def test_a_coin_flip_end_switch_link_marks_those_players_unconfident() -> None:
+    """Identity inside each segment can look clean while the link joining them is a
+    guess; the rows must not claim confidence the link does not have."""
+    switch = 1000
+    players = resolve(teams_switch_ends(switch, 2000), end_switch_frames=(switch,))
+    before = players[players["frame_number"] < switch]
+    after = players[players["frame_number"] >= switch]
+    # Distinct shirts: the link is decided with a wide margin, so confidence survives.
+    assert before["switch_link_margin"].max() == float("inf")
+    assert after["switch_link_margin"].min() > CONFIG.switch_margin
+    assert bool(after["identity_confident"].all())
+
+
+def test_switch_margin_is_reported_per_player() -> None:
+    rows = teams_switch_ends(1000, 2000)
+    _, diagnostics = resolve_identities(
+        pd.DataFrame(rows, columns=RAW_COLUMNS), FPS, STRIDE, frame_height=1080,
+        config=CONFIG, end_switch_frames=(1000,),
+    )
+    link = diagnostics["games"][1]["switch_link"]
+    assert set(link["player_margins"]) == {"1", "2", "3", "4"}
+    assert all(v > 0 for v in link["player_margins"].values())

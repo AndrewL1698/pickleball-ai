@@ -80,6 +80,11 @@ class IdentityConfig:
     # kit give the colour evidence almost nothing to work with, so continuity of the
     # tracker through the changeover decides those cases.
     switch_continuity_weight: float = 0.5
+    # How much better the chosen cross-switch pairing must be than the alternative, in
+    # the same clothing-distance units, before the players it joins count as confident.
+    # Provisional: the two switches measured so far scored 0.04 (wrong, both teams in
+    # white) and 0.26-0.42 (right, teams in distinct colours).
+    switch_margin: float = 0.15
 
 
 @dataclass(frozen=True)
@@ -438,7 +443,7 @@ PLAYER_COLUMNS = [
     "frame_number", "timestamp_ms", "player_id", "team", "side", "slot", "track_id",
     "segment_id", "tracklet_id", "x1", "y1", "x2", "y2", "confidence", "image_x", "image_y",
     "court_x", "court_y", "smooth_x", "smooth_y", "truncated", "identity_margin",
-    "identity_confident",
+    "switch_link_margin", "identity_confident",
 ]
 
 
@@ -468,6 +473,10 @@ def resolve_identities(
     mapping = {1: 1, 2: 2, 3: 3, 4: 4}
     reference: dict[int, Descriptor | None] = {}  # clothing prototypes by persistent ID
     reference_tracks: dict[int, set[int]] = {}  # tracker IDs seen per persistent ID
+    # Weakest cross-switch link each player has been carried through so far. A player
+    # whose identity rests on a coin-flip link is not confident afterwards, however clean
+    # the tracking inside the segment looks.
+    link_margin: dict[int, float] = dict.fromkeys((1, 2, 3, 4), INF)
     parts = []
     id_offset = 0  # keep segment/tracklet IDs unique across games
     for index, ((start, end), (players, game_diagnostics, prototypes, tracks)) in enumerate(
@@ -477,6 +486,8 @@ def resolve_identities(
         if index > 0:
             mapping, link = _link_across_switch(mapping, reference, prototypes,
                                                 reference_tracks, tracks, config)
+            for pid, margin in link.get("player_margins", {}).items():
+                link_margin[int(pid)] = min(link_margin[int(pid)], float(margin))
         reference = {mapping[k]: v for k, v in prototypes.items()}
         reference_tracks = {mapping[k]: v for k, v in tracks.items()}
         diagnostics["games"].append({
@@ -490,6 +501,7 @@ def resolve_identities(
             players["side"] = np.where(players["player_id"] <= config.players_per_side,
                                        "near", "far")
             players["player_id"] = players["player_id"].map(mapping)
+            players["switch_link_margin"] = players["player_id"].map(link_margin)
             players["segment_id"] += id_offset
             players["tracklet_id"] += id_offset
             id_offset = int(max(players["segment_id"].max(), players["tracklet_id"].max())) + 1
@@ -499,6 +511,7 @@ def resolve_identities(
         return pd.DataFrame(columns=PLAYER_COLUMNS), diagnostics
     players = pd.concat(parts, ignore_index=True)
     players["team"] = np.where(players["player_id"] <= config.players_per_side, "A", "B")
+    players["identity_confident"] &= players["switch_link_margin"] >= config.switch_margin
     players["image_x"] = (players["x1"] + players["x2"]) / 2.0
     players["image_y"] = players["y2"]
     players["truncated"] = players["y2"] >= frame_height - 2
@@ -542,6 +555,7 @@ def _link_across_switch(
     far_before = [previous[3], previous[4]]
     mapping: dict[int, int] = {}
     evidence: dict[str, Any] = {}
+    margins: dict[int, float] = {}
     for local_ids, persistent_ids in (((3, 4), near_before), ((1, 2), far_before)):
         costs = []
         for order in permutations(persistent_ids):
@@ -554,14 +568,18 @@ def _link_across_switch(
         costs.sort(key=lambda item: item[0])
         best_cost, best, best_colour, best_shared = costs[0]
         mapping.update(dict(zip(local_ids, best, strict=True)))
+        margin = costs[1][0] - best_cost
         evidence[f"local_{local_ids[0]}{local_ids[1]}"] = {
             "players": list(best), "cost": round(best_cost, 3),
-            "alternative_cost": round(costs[1][0], 3),
+            "alternative_cost": round(costs[1][0], 3), "margin": round(margin, 3),
             "color_cost": round(best_colour, 3), "shared_track_ids": best_shared,
         }
+        for pid in best:
+            margins[pid] = margin
     evidence["switch_color_cost"] = round(_team_cost(mapping, before, after), 3)
     no_switch = {1: previous[1], 2: previous[2], 3: previous[3], 4: previous[4]}
     evidence["no_switch_color_cost"] = round(_best_team_cost(no_switch, before, after), 3)
+    evidence["player_margins"] = {str(k): round(v, 3) for k, v in sorted(margins.items())}
     return mapping, evidence
 
 

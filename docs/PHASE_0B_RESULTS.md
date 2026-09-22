@@ -184,14 +184,16 @@ about 0.6 ft of depth at that camera height.
 
 **Two extra predictions** in `gold_mid`, both a person near the court who is not a player.
 
-**The confidence flag does not cover this failure.** `identity_confident` comes from the
-Viterbi margin of the partner assignment *inside* one game segment, so after the
-`buzz_a` changeover every row is marked confident, including the eight wrong ones. The
-switch-link margin (0.603 against 0.640) is recorded in the run record but never reaches
-the per-row flag. Anything downstream that trusts `identity_confident` would be misled
-here, which breaks the project's "never present low-confidence output as truth" rule.
-Propagating the link margin into the rows of the segments it joins is the obvious fix and
-is not done yet.
+**The confidence flag now covers this failure.** It did not at first: `identity_confident`
+came only from the Viterbi margin of the partner assignment *inside* one game segment, so
+every row after the `buzz_a` changeover was marked confident, including the eight wrong
+ones. Each player now also carries `switch_link_margin`, the gap between the chosen
+cross-switch pairing and the alternative, and a player whose identity rests on a link
+below `switch_margin` is not confident afterwards. On `buzz_a` the two swapped players
+carry a margin of 0.037 and are flagged for the whole post-switch segment; the two
+correctly linked players carry 1.416 and stay confident. 19% of that window's rows are
+now marked low-confidence, and they are the wrong ones. The threshold (0.15) is
+provisional: it rests on two observed switches, one at 0.04 and one at 0.26-0.42.
 
 ### End switches
 
