@@ -135,3 +135,13 @@ def test_candidates_outside_the_court_gate_are_not_selected() -> None:
     frames, timestamps = processed_frames(frame)
     track = select_track(frame, frames, timestamps, FPS, CONFIG)
     assert track["x"].tolist() == [900.0, 900.0]
+
+
+def test_isolated_detections_are_dropped_by_the_minimum_run_rule() -> None:
+    rows = [(0, 0, 100.0, 100.0, 0.9), (1, -1, np.nan, np.nan, np.nan),
+            (2, 0, 300.0, 300.0, 0.9),  # one frame on its own
+            (3, -1, np.nan, np.nan, np.nan),
+            (4, 0, 100.0, 100.0, 0.9), (5, 0, 108.0, 100.0, 0.9), (6, 0, 116.0, 100.0, 0.9)]
+    track = track_of(candidates(rows), BallTrackConfig(min_run_frames=2))
+    assert track["visible"].tolist() == [False, False, False, False, True, True, True]
+    assert bool(np.isnan(track.loc[2, "x"]))

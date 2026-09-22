@@ -18,7 +18,10 @@
     "max_candidates": 5,
     "target_fps": 30.0,
     "render_seconds": 30.0,
-    "track": {}
+    "track": {
+      "min_score": 0.35
+    },
+    "tuning_note": "min_score 0.35 chosen on buzz_a (tune): at equal recall it raised precision at 20 px from 0.30 to 0.44 and cut reports on ball-free frames from 0.75 to 0.44. min_run_frames (require N consecutive visible frames) trades recall for precision (5 frames: recall 0.50 -> 0.29, precision 0.44 -> 0.57) and is left at 1 until more labels exist to choose it on."
   },
   "clips": {
     "gold": {
@@ -168,13 +171,16 @@
       "start_s": 60,
       "end_s": 240,
       "split": "tune",
-      "purpose": "Best-quality centred camera; primary tuning window and first ball-tracking window.",
+      "purpose": "Best-quality centred camera; primary tuning window and first ball-tracking window. The teams change ends at ~170 s.",
       "ball": {
         "start_s": 90,
         "end_s": 150
       },
       "player_labels": "data/annotations/buzz/player_labels_buzz_a.json",
-      "ball_labels": "data/annotations/buzz/ball_labels_buzz_a.json"
+      "ball_labels": "data/annotations/buzz/ball_labels_buzz_a.json",
+      "end_switches_s": [
+        172
+      ]
     },
     {
       "id": "buzz_b",

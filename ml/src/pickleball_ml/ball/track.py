@@ -48,6 +48,9 @@ class BallTrackConfig:
     motion_weight: float = 0.30  # maximum cost of departing from the predicted position
     prediction_tolerance_px: float = 40.0  # deviation that costs the full motion_weight
     max_speed_px_s: float = 6000.0  # hard gate, ~65 mph near the camera at 1080p
+    # A ball that appears for a frame or two and never again is a distractor, not a ball:
+    # drop visible runs shorter than this many consecutive processed frames.
+    min_run_frames: int = 1
     interpolate_max_gap_frames: int = 0  # 0 = never interpolate
 
 
@@ -93,6 +96,8 @@ def select_track(
         previous = (frame, x, y)
 
     track = pd.DataFrame(rows, columns=TRACK_COLUMNS)
+    if config.min_run_frames > 1:
+        track = drop_short_runs(track, config.min_run_frames)
     if config.interpolate_max_gap_frames > 0:
         track = interpolate_short_gaps(track, config.interpolate_max_gap_frames)
     return track
@@ -178,6 +183,29 @@ def _transition_cost(
     predicted = (2 * previous[0] - before[0], 2 * previous[1] - before[1])
     deviation = float(np.hypot(current[0] - predicted[0], current[1] - predicted[1]))
     return config.motion_weight * min(deviation / config.prediction_tolerance_px, 1.0)
+
+
+def drop_short_runs(track: pd.DataFrame, min_run_frames: int) -> pd.DataFrame:
+    """Blank runs of fewer than `min_run_frames` consecutive visible frames.
+
+    An isolated detection has no trajectory around it to support it, which is what a
+    one-frame blob on a shoe or a line looks like; a real ball is seen over several
+    consecutive frames.
+    """
+    out = track.copy()
+    visible = out["visible"].to_numpy(dtype=bool)
+    start = None
+    for index in range(len(visible) + 1):
+        if index < len(visible) and visible[index]:
+            start = index if start is None else start
+            continue
+        if start is not None and index - start < min_run_frames:
+            rows = out.index[start:index]
+            out.loc[rows, ["x", "y", "score", "speed_px_s"]] = np.nan
+            out.loc[rows, "visible"] = False
+            out.loc[rows, "candidate"] = -1
+        start = None
+    return out
 
 
 def interpolate_short_gaps(track: pd.DataFrame, max_gap_frames: int) -> pd.DataFrame:
