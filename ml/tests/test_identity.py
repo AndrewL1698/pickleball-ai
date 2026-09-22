@@ -206,3 +206,27 @@ def test_without_the_switch_input_the_teams_are_mixed_up() -> None:
 def test_end_switch_outside_the_window_is_rejected() -> None:
     with pytest.raises(ValueError, match="outside"):
         resolve(four_players(range(0, 100, STRIDE)), end_switch_frames=(5000,))
+
+
+def test_end_switch_uses_tracker_continuity_when_the_teams_wear_the_same_kit() -> None:
+    """Colour cannot separate partners in matching kit; a tracker ID that survives the
+    changeover can. Every player here wears shirt 1."""
+    switch = 1000
+    game1 = range(0, switch - 100, STRIDE)
+    game2 = range(switch + 100, 2000, STRIDE)
+    rows = (walk(1, game1, (-5, -15), (-5, -15), shirt=1)
+            + walk(2, game1, (5, -15), (5, -15), shirt=1)
+            + walk(3, game1, (-5, 12), (-5, 12), shirt=1)
+            + walk(4, game1, (5, 12), (5, 12), shirt=1)
+            # The tracker keeps IDs 1 and 2 through the changeover; 3 and 4 are lost.
+            + walk(1, game2, (5, 12), (5, 12), shirt=1)
+            + walk(2, game2, (-5, 12), (-5, 12), shirt=1)
+            + walk(13, game2, (-5, -15), (-5, -15), shirt=1)
+            + walk(14, game2, (5, -15), (5, -15), shirt=1))
+    players = resolve(rows, end_switch_frames=(switch,))
+    after = players[players["frame_number"] >= switch]
+    kept = after[after["track_id"].isin([1, 2])]
+    before = players[players["frame_number"] < switch]
+    for track_id in (1, 2):
+        assert (set(before.loc[before["track_id"] == track_id, "player_id"])
+                == set(kept.loc[kept["track_id"] == track_id, "player_id"]))

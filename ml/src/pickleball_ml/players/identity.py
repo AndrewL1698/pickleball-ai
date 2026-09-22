@@ -75,6 +75,11 @@ class IdentityConfig:
     segment_switch_cost: float = 20.0
     prototype_iterations: int = 5
     confidence_margin: float = 5.0
+    # Linking players across an end switch: how much one shared tracker ID is worth,
+    # in the same units as the clothing distance (0-1 per player). Teams in matching
+    # kit give the colour evidence almost nothing to work with, so continuity of the
+    # tracker through the changeover decides those cases.
+    switch_continuity_weight: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -448,7 +453,8 @@ def resolve_identities(
     window; 3-4 are team B.
     """
     bounds = _game_bounds(detections, end_switch_frames)
-    games: list[tuple[pd.DataFrame, dict[str, Any], dict[int, Descriptor | None]]] = []
+    games: list[tuple[pd.DataFrame, dict[str, Any], dict[int, Descriptor | None],
+                      dict[int, set[int]]]] = []
     for start, end in bounds:
         in_game = (detections["frame_number"] >= start) & (detections["frame_number"] < end)
         games.append(_resolve_game(detections[in_game], source_fps, stride, config))
@@ -461,15 +467,18 @@ def resolve_identities(
     # local player id (1-2 near, 3-4 far in that game) -> persistent player id
     mapping = {1: 1, 2: 2, 3: 3, 4: 4}
     reference: dict[int, Descriptor | None] = {}  # clothing prototypes by persistent ID
+    reference_tracks: dict[int, set[int]] = {}  # tracker IDs seen per persistent ID
     parts = []
     id_offset = 0  # keep segment/tracklet IDs unique across games
-    for index, ((start, end), (players, game_diagnostics, prototypes)) in enumerate(
+    for index, ((start, end), (players, game_diagnostics, prototypes, tracks)) in enumerate(
         zip(bounds, games, strict=True)
     ):
         link: dict[str, Any] = {}
         if index > 0:
-            mapping, link = _link_across_switch(mapping, reference, prototypes)
+            mapping, link = _link_across_switch(mapping, reference, prototypes,
+                                                reference_tracks, tracks, config)
         reference = {mapping[k]: v for k, v in prototypes.items()}
+        reference_tracks = {mapping[k]: v for k, v in tracks.items()}
         diagnostics["games"].append({
             "start_frame": None if start == -INF else int(start),
             "end_frame": None if end == INF else int(end),
@@ -515,14 +524,19 @@ def _game_bounds(
 
 def _link_across_switch(
     previous: dict[int, int], before: dict[int, Descriptor | None],
-    after: dict[int, Descriptor | None],
+    after: dict[int, Descriptor | None], before_tracks: dict[int, set[int]],
+    after_tracks: dict[int, set[int]], config: IdentityConfig,
 ) -> tuple[dict[int, int], dict[str, Any]]:
     """Persistent player ID for each local player of the next game.
 
     `previous` maps the previous game's local IDs to persistent IDs; `before` holds
-    clothing prototypes by persistent ID; `after` by the new game's local ID. The team
-    that was near (local 1-2) is now far (local 3-4) and vice versa; within each team
-    the partner assignment with the lower total color distance wins.
+    clothing prototypes by persistent ID, `after` by the new game's local ID, and the
+    `*_tracks` maps hold the raw tracker IDs each player was built from. The team that
+    was near (local 1-2) is now far (local 3-4) and vice versa; within each team the
+    partner assignment with the lowest cost wins, where cost is clothing distance minus
+    a reward for every tracker ID the two share. A player the tracker followed around
+    the net keeps their ID, which is the only usable signal when both partners wear the
+    same kit.
     """
     near_before = [previous[1], previous[2]]
     far_before = [previous[3], previous[4]]
@@ -531,15 +545,19 @@ def _link_across_switch(
     for local_ids, persistent_ids in (((3, 4), near_before), ((1, 2), far_before)):
         costs = []
         for order in permutations(persistent_ids):
-            cost = sum(appearance_distance(after.get(local), before.get(pid))
-                       for local, pid in zip(local_ids, order, strict=True))
-            costs.append((cost, order))
+            colour = sum(appearance_distance(after.get(local), before.get(pid))
+                         for local, pid in zip(local_ids, order, strict=True))
+            shared = sum(len(after_tracks.get(local, set()) & before_tracks.get(pid, set()))
+                         for local, pid in zip(local_ids, order, strict=True))
+            costs.append((colour - config.switch_continuity_weight * shared, order, colour,
+                          shared))
         costs.sort(key=lambda item: item[0])
-        best_cost, best = costs[0]
+        best_cost, best, best_colour, best_shared = costs[0]
         mapping.update(dict(zip(local_ids, best, strict=True)))
         evidence[f"local_{local_ids[0]}{local_ids[1]}"] = {
-            "players": list(best), "color_cost": round(best_cost, 3),
+            "players": list(best), "cost": round(best_cost, 3),
             "alternative_cost": round(costs[1][0], 3),
+            "color_cost": round(best_colour, 3), "shared_track_ids": best_shared,
         }
     evidence["switch_color_cost"] = round(_team_cost(mapping, before, after), 3)
     no_switch = {1: previous[1], 2: previous[2], 3: previous[3], 4: previous[4]}
@@ -569,9 +587,9 @@ def _best_team_cost(mapping: dict[int, int], before: dict[int, Descriptor | None
 
 def _resolve_game(
     detections: pd.DataFrame, source_fps: float, stride: int, config: IdentityConfig,
-) -> tuple[pd.DataFrame, dict[str, Any], dict[int, Descriptor | None]]:
-    """Players of one game segment with local IDs (1-2 near, 3-4 far), diagnostics, and a
-    clothing prototype per local ID."""
+) -> tuple[pd.DataFrame, dict[str, Any], dict[int, Descriptor | None], dict[int, set[int]]]:
+    """Players of one game segment with local IDs (1-2 near, 3-4 far), diagnostics, a
+    clothing prototype per local ID, and the tracker IDs each was built from."""
     rows = split_tracklets(detections, source_fps, stride, config)
     tracklets = summarize_tracklets(rows, config)
     frames_by_tracklet = {cast(int, k): np.sort(g.to_numpy()) for k, g in
@@ -608,13 +626,15 @@ def _resolve_game(
 
     players = rows[rows["tracklet_id"].isin(list(player_of))].copy()
     if players.empty:
-        return players, diagnostics, prototypes
+        return players, diagnostics, prototypes, {}
     players["player_id"] = players["tracklet_id"].map(player_of)
     players["identity_margin"] = players["tracklet_id"].map(margin_of)
     players["identity_confident"] = players["identity_margin"] >= config.confidence_margin
     players = (players.sort_values(["player_id", "frame_number", "tracklet_id"])
                .drop_duplicates(["player_id", "frame_number"], keep="first"))
-    return players, diagnostics, prototypes
+    tracks = {cast(int, pid): {int(t) for t in group} for pid, group in
+              players.groupby("player_id")["track_id"]}
+    return players, diagnostics, prototypes, tracks
 
 
 def _assign_slots(players: pd.DataFrame) -> pd.Series:
