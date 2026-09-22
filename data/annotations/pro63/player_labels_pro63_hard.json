@@ -1,0 +1,977 @@
+{
+  "schema": "pbml.player_labels/v1",
+  "clip": "pro63",
+  "window": "pro63_hard",
+  "video": "data/raw/Pickleball Pro Men's Doubles WITH Commentary from a 6.3 DUPR - Kevin Dong Pickleball (1080p).mp4",
+  "annotator": "claude (visual review of exported frames and crops)",
+  "created_at": "2026-09-22T21:26:32.013671+00:00",
+  "people": {
+    "P_beard": "dark-skinned, bearded, black 'ITT TEAM' tee, black shorts",
+    "P_young": "young, pale, dark hair, plain black tee, black shorts",
+    "P_whitecap": "black kit, white cap",
+    "P_nocap": "black kit, no cap"
+  },
+  "instructions": "For every court player visible in the frame add {'person': <name>, 'candidate': <id>}; if the player is visible but has no candidate box, add {'person': <name>, 'box': null}. Leave players that are not visible out. Name the four people in 'people' by clothing, not by predicted ID.",
+  "frames": [
+    {
+      "frame_number": 43200,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            462.1,
+            499.4,
+            629.4,
+            917.9
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            291.3,
+            456.6,
+            460.3,
+            847.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1149.2,
+            316.0,
+            1204.0,
+            451.1
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            808.6,
+            851.6,
+            1144.8,
+            1078.0
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            864.1,
+            337.8,
+            914.3,
+            507.8
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            301.4,
+            942.9,
+            583.3,
+            1079.1
+          ]
+        },
+        {
+          "id": 6,
+          "box": [
+            1782.7,
+            1005.8,
+            1919.4,
+            1079.6
+          ]
+        },
+        {
+          "id": 7,
+          "box": [
+            0.7,
+            940.7,
+            130.6,
+            1078.9
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "P_beard",
+          "candidate": 0
+        },
+        {
+          "person": "P_nocap",
+          "candidate": 2
+        },
+        {
+          "person": "P_whitecap",
+          "candidate": 4
+        },
+        {
+          "person": "P_young",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 44100,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1501.1,
+            502.5,
+            1761.2,
+            1031.6
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1577.5,
+            331.8,
+            1669.7,
+            561.6
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            938.2,
+            322.3,
+            981.7,
+            459.0
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            794.8,
+            849.6,
+            1061.8,
+            1077.8
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            1132.2,
+            317.3,
+            1174.6,
+            452.9
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            301.4,
+            921.4,
+            539.0,
+            1078.5
+          ]
+        },
+        {
+          "id": 6,
+          "box": [
+            1632.4,
+            614.8,
+            1873.2,
+            1051.8
+          ]
+        },
+        {
+          "id": 7,
+          "box": [
+            0.2,
+            934.5,
+            81.5,
+            1078.4
+          ]
+        },
+        {
+          "id": 8,
+          "box": [
+            0.1,
+            934.2,
+            146.4,
+            1079.5
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "the two far players in identical black kit could not be separated"
+    },
+    {
+      "frame_number": 45000,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1177.7,
+            453.0,
+            1356.4,
+            666.6
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            815.6,
+            395.1,
+            937.8,
+            671.4
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            819.2,
+            839.3,
+            1092.0,
+            1078.0
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            288.4,
+            940.6,
+            504.5,
+            1079.5
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            1106.4,
+            365.4,
+            1208.3,
+            519.9
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            0.3,
+            959.4,
+            146.4,
+            1078.7
+          ]
+        },
+        {
+          "id": 6,
+          "box": [
+            910.7,
+            377.2,
+            1021.5,
+            524.8
+          ]
+        },
+        {
+          "id": 7,
+          "box": [
+            1783.3,
+            1031.1,
+            1919.9,
+            1079.6
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "P_beard",
+          "candidate": 0
+        },
+        {
+          "person": "P_nocap",
+          "candidate": 6
+        },
+        {
+          "person": "P_whitecap",
+          "candidate": 4
+        },
+        {
+          "person": "P_young",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 45900,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            601.2,
+            412.8,
+            705.6,
+            671.4
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            966.3,
+            320.0,
+            1032.6,
+            453.2
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            766.9,
+            384.4,
+            880.7,
+            633.9
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            743.2,
+            828.0,
+            991.1,
+            1078.0
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            296.2,
+            940.2,
+            512.7,
+            1079.5
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            1053.3,
+            321.4,
+            1112.7,
+            457.5
+          ]
+        },
+        {
+          "id": 6,
+          "box": [
+            1578.1,
+            335.4,
+            1669.8,
+            563.8
+          ]
+        },
+        {
+          "id": 7,
+          "box": [
+            0.2,
+            937.0,
+            112.3,
+            1079.0
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "P_beard",
+          "candidate": 0
+        },
+        {
+          "person": "P_nocap",
+          "candidate": 1
+        },
+        {
+          "person": "P_whitecap",
+          "candidate": 5
+        },
+        {
+          "person": "P_young",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 46800,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            754.7,
+            831.7,
+            1033.3,
+            1077.4
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1137.7,
+            355.2,
+            1206.0,
+            582.2
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            555.9,
+            356.5,
+            628.0,
+            528.5
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            278.1,
+            967.3,
+            495.7,
+            1079.4
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            0.6,
+            968.9,
+            151.3,
+            1079.7
+          ]
+        }
+      ],
+      "players": []
+    },
+    {
+      "frame_number": 47700,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            282.1,
+            966.4,
+            488.8,
+            1079.4
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            590.0,
+            432.2,
+            708.4,
+            787.4
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            0.0,
+            945.5,
+            204.1,
+            1079.4
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            701.6,
+            428.4,
+            812.6,
+            749.1
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            1133.0,
+            355.9,
+            1196.4,
+            582.4
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            974.2,
+            380.6,
+            1048.0,
+            580.4
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "P_beard",
+          "candidate": 3
+        },
+        {
+          "person": "P_young",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 48600,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1146.0,
+            353.7,
+            1215.7,
+            582.5
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            281.9,
+            956.7,
+            485.7,
+            1079.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            941.1,
+            377.1,
+            1033.5,
+            580.4
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1083.7,
+            315.3,
+            1130.1,
+            456.9
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            0.3,
+            951.6,
+            147.7,
+            1079.5
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            0.1,
+            498.2,
+            185.6,
+            974.7
+          ]
+        },
+        {
+          "id": 6,
+          "box": [
+            944.4,
+            377.1,
+            1038.8,
+            456.0
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "the two far players in identical black kit could not be separated"
+    },
+    {
+      "frame_number": 49500,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            96.3,
+            633.5,
+            438.9,
+            983.7
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1157.5,
+            377.1,
+            1259.4,
+            658.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1066.5,
+            329.3,
+            1141.2,
+            463.6
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            937.7,
+            337.5,
+            1003.8,
+            454.0
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            294.6,
+            935.3,
+            558.2,
+            1078.6
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            0.1,
+            1008.2,
+            31.4,
+            1079.6
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "the two far players in identical black kit could not be separated"
+    },
+    {
+      "frame_number": 50400,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1131.5,
+            418.8,
+            1280.2,
+            641.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            847.3,
+            381.8,
+            972.8,
+            647.0
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            301.2,
+            938.8,
+            512.6,
+            1079.3
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1306.5,
+            320.4,
+            1375.2,
+            438.6
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            943.2,
+            351.5,
+            1014.2,
+            467.7
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            0.3,
+            947.1,
+            109.4,
+            1079.3
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "P_beard",
+          "candidate": 0
+        },
+        {
+          "person": "P_nocap",
+          "candidate": 3
+        },
+        {
+          "person": "P_whitecap",
+          "candidate": 4
+        },
+        {
+          "person": "P_young",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 51300,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1330.9,
+            526.1,
+            1586.3,
+            982.1
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            702.5,
+            479.5,
+            929.6,
+            942.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1156.1,
+            330.2,
+            1210.3,
+            496.4
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            894.3,
+            340.7,
+            955.0,
+            449.1
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            287.8,
+            938.2,
+            556.1,
+            1079.0
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            0.2,
+            946.7,
+            104.5,
+            1078.9
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "P_beard",
+          "candidate": 0
+        },
+        {
+          "person": "P_nocap",
+          "candidate": 3
+        },
+        {
+          "person": "P_whitecap",
+          "candidate": 2
+        },
+        {
+          "person": "P_young",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 52200,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            335.7,
+            476.8,
+            551.2,
+            932.5
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            656.7,
+            520.4,
+            847.8,
+            992.0
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1541.4,
+            331.8,
+            1679.3,
+            561.8
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            926.9,
+            352.4,
+            987.8,
+            526.4
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            1193.2,
+            310.1,
+            1237.0,
+            439.0
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            285.3,
+            938.9,
+            492.4,
+            1077.4
+          ]
+        },
+        {
+          "id": 6,
+          "box": [
+            0.2,
+            949.1,
+            104.1,
+            1079.3
+          ]
+        },
+        {
+          "id": 7,
+          "box": [
+            330.4,
+            1024.3,
+            499.1,
+            1079.4
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "P_beard",
+          "candidate": 1
+        },
+        {
+          "person": "P_nocap",
+          "candidate": 3
+        },
+        {
+          "person": "P_whitecap",
+          "candidate": 4
+        },
+        {
+          "person": "P_young",
+          "candidate": 0
+        }
+      ]
+    },
+    {
+      "frame_number": 53100,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1203.4,
+            413.5,
+            1374.4,
+            647.0
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            879.3,
+            393.1,
+            1002.2,
+            642.3
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1134.6,
+            382.7,
+            1200.3,
+            521.7
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            286.3,
+            945.9,
+            590.6,
+            1079.4
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            960.9,
+            365.0,
+            994.0,
+            439.0
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            960.3,
+            364.8,
+            1016.4,
+            513.0
+          ]
+        },
+        {
+          "id": 6,
+          "box": [
+            507.5,
+            1029.9,
+            705.8,
+            1079.9
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "the two far players in identical black kit could not be separated"
+    }
+  ],
+  "notes": "6.3 DUPR window, held out. All four players wear black tops and black shorts, so the near pair is told apart by beard and shirt print and the far pair only by a white cap. Frames where the far pair could not be separated are marked skip rather than guessed, which is a limitation of this footage for identity evaluation and not only of the tracker. Referees in white, spectators along the bottom rail and people on the neighbouring court are never labeled. The frame at 46800 is during the changeover: no court player is on court, so it carries an empty player list and still measures predictions that should not be there."
+}
