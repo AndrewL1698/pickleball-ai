@@ -1,0 +1,545 @@
+{
+  "schema": "pbml.player_labels/v1",
+  "clip": "riggs",
+  "window": "riggs_b",
+  "video": "data/raw/Unedited Pickleball Match Men's Doubles Game 5 Rec Play 2025-7-5 - Riggs Pickleball (1080p).mp4",
+  "annotator": "claude (visual review of exported frames and crops)",
+  "created_at": "2026-09-22T21:12:25.271787+00:00",
+  "people": {
+    "N_olive": "older man, olive-grey tee and olive shorts, no cap",
+    "N_maroon": "maroon/rust tee, black shorts, black cap",
+    "F_grey": "grey tee, navy shorts, younger, no cap",
+    "F_black": "black tee, black shorts"
+  },
+  "instructions": "For every court player visible in the frame add {'person': <name>, 'candidate': <id>}; if the player is visible but has no candidate box, add {'person': <name>, 'box': null}. Leave players that are not visible out. Name the four people in 'people' by clothing, not by predicted ID.",
+  "frames": [
+    {
+      "frame_number": 35964,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            165.5,
+            538.1,
+            318.7,
+            906.6
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            824.8,
+            398.2,
+            914.2,
+            652.0
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            968.0,
+            373.4,
+            1047.5,
+            489.8
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            870.5,
+            389.7,
+            908.8,
+            452.0
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_black",
+          "candidate": 3
+        },
+        {
+          "person": "F_grey",
+          "candidate": 2
+        },
+        {
+          "person": "N_maroon",
+          "candidate": 1
+        },
+        {
+          "person": "N_olive",
+          "candidate": 0
+        }
+      ]
+    },
+    {
+      "frame_number": 37164,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            559.2,
+            428.7,
+            652.0,
+            671.1
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            0.2,
+            723.7,
+            224.1,
+            1076.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            838.3,
+            371.2,
+            902.1,
+            497.6
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1053.5,
+            342.5,
+            1094.5,
+            481.2
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_black",
+          "candidate": 3
+        },
+        {
+          "person": "F_grey",
+          "candidate": 2
+        },
+        {
+          "person": "N_maroon",
+          "candidate": 1
+        },
+        {
+          "person": "N_olive",
+          "candidate": 0
+        }
+      ]
+    },
+    {
+      "frame_number": 38364,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            751.6,
+            437.7,
+            895.0,
+            596.1
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            953.9,
+            379.0,
+            1036.2,
+            592.6
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1001.8,
+            354.8,
+            1051.0,
+            461.3
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            880.9,
+            369.6,
+            920.4,
+            458.1
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_black",
+          "candidate": 3
+        },
+        {
+          "person": "F_grey",
+          "candidate": 2
+        },
+        {
+          "person": "N_maroon",
+          "candidate": 1
+        },
+        {
+          "person": "N_olive",
+          "candidate": 0
+        }
+      ]
+    },
+    {
+      "frame_number": 39564,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            942.2,
+            371.9,
+            1034.6,
+            590.9
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            518.4,
+            464.2,
+            648.9,
+            737.1
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            876.2,
+            360.8,
+            919.9,
+            454.6
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1003.3,
+            372.2,
+            1031.7,
+            442.5
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_black",
+          "candidate": 3
+        },
+        {
+          "person": "F_grey",
+          "candidate": 2
+        },
+        {
+          "person": "N_maroon",
+          "candidate": 0
+        },
+        {
+          "person": "N_olive",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 40764,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            927.0,
+            372.9,
+            1019.9,
+            590.2
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            729.8,
+            409.4,
+            831.2,
+            609.3
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            795.5,
+            387.9,
+            871.2,
+            495.3
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            971.5,
+            368.7,
+            1017.5,
+            482.4
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_black",
+          "candidate": 3
+        },
+        {
+          "person": "F_grey",
+          "candidate": 2
+        },
+        {
+          "person": "N_maroon",
+          "candidate": 0
+        },
+        {
+          "person": "N_olive",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 41964,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            861.9,
+            380.1,
+            963.0,
+            598.0
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            621.0,
+            451.2,
+            733.4,
+            612.5
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            958.7,
+            375.2,
+            1016.7,
+            486.6
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            797.5,
+            380.8,
+            876.0,
+            499.6
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_black",
+          "candidate": 2
+        },
+        {
+          "person": "F_grey",
+          "candidate": 3
+        },
+        {
+          "person": "N_maroon",
+          "candidate": 0
+        },
+        {
+          "person": "N_olive",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 43164,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            522.9,
+            424.9,
+            652.8,
+            717.8
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            774.0,
+            373.5,
+            827.4,
+            490.2
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1036.7,
+            361.1,
+            1070.0,
+            475.5
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_black",
+          "candidate": 2
+        },
+        {
+          "person": "F_grey",
+          "candidate": 1
+        },
+        {
+          "person": "N_maroon",
+          "candidate": 0
+        }
+      ]
+    },
+    {
+      "frame_number": 44364,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            855.4,
+            449.3,
+            1051.5,
+            955.4
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            227.4,
+            533.1,
+            381.7,
+            976.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            971.3,
+            370.6,
+            1022.7,
+            487.2
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            860.8,
+            364.8,
+            901.7,
+            457.0
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_black",
+          "candidate": 2
+        },
+        {
+          "person": "F_grey",
+          "candidate": 3
+        },
+        {
+          "person": "N_maroon",
+          "candidate": 0
+        },
+        {
+          "person": "N_olive",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 45564,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            22.7,
+            561.8,
+            273.9,
+            1074.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            973.2,
+            564.4,
+            1222.3,
+            1074.0
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            809.6,
+            376.8,
+            883.0,
+            499.7
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1003.7,
+            368.3,
+            1050.0,
+            459.5
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_black",
+          "candidate": 3
+        },
+        {
+          "person": "F_grey",
+          "candidate": 2
+        },
+        {
+          "person": "N_maroon",
+          "candidate": 0
+        },
+        {
+          "person": "N_olive",
+          "candidate": 1
+        }
+      ]
+    }
+  ],
+  "notes": "Riggs 10:00-13:00, second camera position, held out. Same four people as riggs_a and the same ends. Players on the neighbouring courts are never labeled."
+}

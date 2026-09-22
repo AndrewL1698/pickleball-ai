@@ -228,10 +228,10 @@
       "start_s": 720,
       "end_s": 900,
       "split": "test",
-      "purpose": "Held-out hard condition: 6.3 DUPR play, softer image, spectators along the bottom edge.",
+      "purpose": "Held-out hard condition: 6.3 DUPR play, softer image, a spectator's head fixed in the lower middle of the frame. The window contains a changeover: play 720-750 s, break 765-810 s, play from 825 s, so the ball range is placed on the second block of rallies.",
       "ball": {
-        "start_s": 750,
-        "end_s": 810
+        "start_s": 825,
+        "end_s": 885
       },
       "player_labels": "data/annotations/pro63/player_labels_pro63_hard.json",
       "ball_labels": "data/annotations/pro63/ball_labels_pro63_hard.json"

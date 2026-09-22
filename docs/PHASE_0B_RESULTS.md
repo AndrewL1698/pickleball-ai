@@ -41,7 +41,7 @@ everything in `pro63` were left alone until the configuration was fixed.
 | `buzz_b` | buzz | 9:00-12:00 | test | Same camera, held out |
 | `riggs_a` | riggs | 1:00-4:00 | tune | Off-centre wide-angle camera, first position |
 | `riggs_b` | riggs | 10:00-13:00 | test | Second camera position after the camera was moved |
-| `pro63_hard` | pro63 | 12:00-15:00 | test | Held-out hard condition |
+| `pro63_hard` | pro63 | 12:00-15:00 | test | Held-out hard condition; contains a changeover (play 12:00-12:30, break 12:45-13:30, play from 13:45) |
 
 ## 2. Reproducing this
 
@@ -134,17 +134,18 @@ rather than guessed, which is why some windows have fewer labeled frames than ex
 | `gold_early` | tune | 18 | 65 | 0.92 | 1.00 | 12 / 8 | 0 | 0 of 56 |
 | `gold_switch` | tune | 6 | 22 | 0.73 | 1.00 | 4 / 1 | 0 | 0 of 12 |
 | `buzz_a` | tune | 12 | 45 | 0.96 | **0.81** | 9 / 3 | 0 | **2 of 39** |
-| `riggs_a` | tune | 9 | 34 | 0.97 | 1.00 | 7 / 6 | 0 | 0 of 30 |
+| `riggs_a` | tune | 9 | 34 | 0.97 | 1.00 | 7 / 6 | 1 | 0 of 29 |
 | `gold_mid` | test | 10 | 32 | 0.72 | 1.00 | 4 / 2 | 2 | 0 of 19 |
 | `gold_late` | test | 4 | 16 | 0.88 | 1.00 | 4 / 2 | 0 | 0 of 10 |
 | `buzz_b` | test | 11 | 42 | 0.98 | 1.00 | 9 / 8 | 0 | 0 of 37 |
+| `riggs_b` | test | 9 | 35 | 0.89 | 1.00 | 8 / 5 | 0 | 0 of 27 |
 
 Pooled (counts summed, not averaged over windows):
 
 | Split | Visible labels | Coverage | Identity accuracy when detected | ID switches |
 |---|---|---|---|---|
 | tune | 166 | 0.916 | 0.947 | 2 of 136 |
-| **test (held out)** | 90 | **0.867** | **1.000** | **0 of 66** |
+| **test (held out)** | 125 | **0.872** | **1.000** | **0 of 93** |
 
 "Coverage" is the share of labeled visible players that a predicted player box matched at
 IoU 0.5 or better. "Identity accuracy" is, of those matches, the share whose predicted
@@ -322,7 +323,7 @@ window of 60 fps footage costs roughly 3 minutes of ball inference at 30 fps eff
 ## 7. Recommendation for the next phase
 
 - **Player tracking is good enough to build on.** Held-out coverage 0.87 and identity
-  accuracy 1.00 with zero ID switches, on three windows of two matches, is a working
+  accuracy 1.00 with zero ID switches, on four windows of three matches, is a working
   base for the top-down reconstruction and movement analytics of Phases 3 and 6.
 - **Ball tracking is not, yet.** Keep WASB as the interface-compatible baseline and plan
   Phase 4 around fine-tuning it on pickleball frames. The labeling workflow needed to do
@@ -338,10 +339,10 @@ window of 60 fps footage costs roughly 3 minutes of ball inference at 30 fps eff
 > "A short clip can produce visibly reasonable player tracks and at least partial ball
 > tracks."
 
-**Player tracks: met.** Across seven labeled windows of three matches, 87-92% of visible
+**Player tracks: met.** Across eight labeled windows of three matches, 87-92% of visible
 players are matched by a predicted player box, and of those matches 95% (tuning) and
-100% (held out) carry the right identity, with no ID switches at all on held-out
-windows over 66 opportunities. The rendered top-down video for a
+100% (held out) carry the right identity, with no ID switches at all on held-out windows
+over 93 opportunities. The rendered top-down video for a
 held-out window puts the near players on the near baseline and the far players where
 they actually stand. The one systematic failure, partners swapped after an end switch
 when both teams wear the same kit, is understood, measured, and has a known fix.
