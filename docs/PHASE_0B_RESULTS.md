@@ -287,6 +287,21 @@ reports. The third row is available (`min_run_frames` requires N consecutive vis
 frames) and trades a lot of recall for precision; with only 14 visible labels that
 trade-off cannot be chosen responsibly, so it is left off and documented.
 
+Across the four windows that have ball tracking at the tuned threshold, the share of
+processed frames carrying a ball position is similar everywhere, and the gaps are long:
+
+| Window | Camera | Frames | Frames with a ball | Longest gap | Candidates rejected by the gate |
+|---|---|---|---|---|---|
+| `buzz_a` | centred, 8.3 ft | 1797 | 0.36 | 83 frames (2.8 s) | 3110 |
+| `buzz_b` | centred, 8.3 ft | 1797 | 0.36 | 91 frames (3.0 s) | 2777 |
+| `gold_early` | low, 5.7 ft | 1800 | 0.32 | 122 frames (4.1 s) | 2197 |
+| `riggs_a` | off-centre, 7.3 ft | 1797 | 0.29 | 120 frames (4.0 s) | 2666 |
+
+Those figures include the dead time between rallies, when there is correctly no ball to
+find, so they are not recall; the labeled window above is the recall measurement. What
+they do show is that the tracker never produces a continuous trajectory: every window has
+a gap of three to four seconds.
+
 **What this says about the baseline.** When the tennis model is right it is accurate: the
 median error of a correct report is 6 px, comfortably inside a pickleball's ~25 px
 diameter near the camera. But it is right about half the time on labeled visible frames,
