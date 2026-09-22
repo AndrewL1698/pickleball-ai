@@ -60,8 +60,11 @@ Exit criteria:
 
 A short clip can produce visibly reasonable player tracks and at least partial ball tracks.
 
-Status (2026-09-22): see `docs/PHASE_0B_RESULTS.md` for the full write-up, per-window
-metrics and the pass/fail assessment.
+Status (2026-09-22): **passed**. Nine windows of four matches; on held-out windows 86%
+of visible players are detected and 97% of those carry the right identity, with 4 ID
+switches in 110 opportunities. Ball tracking is partial: 50% recall at 20 px with 6 px
+median error where it fires, and a 3-4 second gap in every window. Full write-up,
+per-window metrics and the pass/fail reasoning in `docs/PHASE_0B_RESULTS.md`.
 
 Carried into later phases:
 
@@ -75,6 +78,8 @@ Carried into later phases:
   pickleball frames.
 - Far-court position noise on low cameras is unresolved; pose-based ground contact was
   not tested.
+- Position accuracy in court feet was never measured against a known ground-truth
+  position, only calibration reprojection error.
 
 ---
 

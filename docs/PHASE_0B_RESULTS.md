@@ -325,11 +325,32 @@ processed frames carrying a ball position is similar everywhere, and the gaps ar
 | `buzz_b` | centred, 8.3 ft | 1797 | 0.36 | 91 frames (3.0 s) | 2777 |
 | `gold_early` | low, 5.7 ft | 1800 | 0.32 | 122 frames (4.1 s) | 2197 |
 | `riggs_a` | off-centre, 7.3 ft | 1797 | 0.29 | 120 frames (4.0 s) | 2666 |
+| `pro63_hard` | elevated, 8.1 ft | 1800 | 0.37 | 90 frames (3.0 s) | 652 |
 
 Those figures include the dead time between rallies, when there is correctly no ball to
 find, so they are not recall; the labeled window above is the recall measurement. What
 they do show is that the tracker never produces a continuous trajectory: every window has
 a gap of three to four seconds.
+
+### The held-out hard clip's ball
+
+`pro63_hard` has no blind ball labels. The colour search that produced the `buzz_a`
+labels fails in that venue: the indoor lighting desaturates the ball while a beige
+ceiling duct, a yellow scoreboard graphic and a sponsor banner all produce stronger
+yellow-green blobs than the ball does. Rather than publish labels the method could not
+support, this window was measured a weaker but honest way: **every position the tracker
+reported in a sample was reviewed on a zoomed crop**. Of 23 reported positions, 17 were
+the ball and 6 were a paddle face or empty court, a precision of 0.74.
+
+That number is not comparable with the `buzz_a` precision of 0.44 above, and it is worth
+being clear why: it reviews the tracker's own output, so it can measure precision but
+says nothing about recall, and it cannot count the balls the tracker never reported. It
+is reported because a precision estimate on the hardest clip is better than no ball
+measurement at all, not because it is the stronger number.
+
+Two things plausibly help this clip: the venue has no adjacent courts in frame, so the
+gate rejects only 652 candidates against 2200-3100 elsewhere, and the dark green
+surround makes the ball more distinct than the pale outdoor courts do.
 
 **What this says about the baseline.** When the tennis model is right it is accurate: the
 median error of a correct report is 6 px, comfortably inside a pickleball's ~25 px
@@ -389,20 +410,25 @@ window of 60 fps footage costs roughly 3 minutes of ball inference at 30 fps eff
 > "A short clip can produce visibly reasonable player tracks and at least partial ball
 > tracks."
 
-**Player tracks: met.** Across eight labeled windows of three matches, 87-92% of visible
-players are matched by a predicted player box, and of those matches 95% (tuning) and
-100% (held out) carry the right identity, with no ID switches at all on held-out windows
-over 93 opportunities. The rendered top-down video for a
-held-out window puts the near players on the near baseline and the far players where
-they actually stand. The one systematic failure, partners swapped after an end switch
-when both teams wear the same kit, is understood, measured, and has a known fix.
+**Player tracks: met.** Across nine labeled windows of four matches, 86-90% of visible
+players are matched by a predicted player box, and of those matches 95% (tuning) and 97%
+(held out) carry the right identity. Held-out windows show 4 ID switches in 110
+opportunities, all four in the single hardest window. The rendered top-down video for a
+held-out window puts the near players on the near baseline and the far players where they
+actually stand.
 
-**Ball tracks: met, narrowly, and only as "partial".** On the labeled window the tracker
-reports a position on 64% of frames where the ball is visible and is within 20 px on 50%
-of them, with a median error of 6 px when it is right. It also reports something on 44%
-of frames where our ball is not visible. That is a partial ball track: enough to see the
-ball follow real rallies in the debug video, not enough to build rally segmentation on
-without more work.
+| | Visible labels | Coverage | Identity accuracy | ID switches |
+|---|---|---|---|---|
+| tuning windows | 166 | 0.904 | 0.947 | 2 of 134 |
+| held-out windows | 151 | 0.861 | 0.969 | 4 of 110 |
+
+**Ball tracks: met, narrowly, and only as "partial".** On the one window with blind ball
+labels the tracker reports a position on 64% of frames where the ball is visible and is
+within 20 px on 50% of them, with a median error of 6 px when it is right; it also
+reports something on 44% of frames where our ball is not visible. On the hardest clip,
+review of its own reported positions found 17 of 23 correct. Every window has a gap of
+three to four seconds somewhere. That is a partial ball track: enough to see the ball
+follow real rallies in the debug video, not enough to build rally segmentation on.
 
 **Verdict: Phase 0b passes**, with the ball half of the criterion met at the low end of
 "partial". The phase's real output is not a working ball tracker but a measured one, plus
@@ -414,3 +440,16 @@ it deliberately in Phase 4.
 If the ball numbers had to support rally segmentation today, this would be a fail. They
 do not: Phase 5 is three phases away, and Phase 3 (player tracking in the worker) and
 Phase 6 (movement analytics) depend only on the player half, which is comfortably met.
+
+### What the numbers do not cover
+
+- **Ball labels exist for one window only** (14 visible, 16 absent frames). Every ball
+  figure in this document rests on that sample or on review of the tracker's own output.
+- **`gold` has no ball labels at all**: at 5.7 ft of camera height the ball is a few
+  pixels across and the labeling method could not resolve it.
+- **ID switches are only visible at the label spacing** (10-20 s). A swap that corrects
+  itself within that window is invisible to this measurement.
+- **Position accuracy in court feet was never measured.** Calibration reprojection error
+  is reported, but no one checked a player's court coordinates against a known position.
+- **Pose-based ground contact was not tested**, so nothing is claimed about whether it
+  would fix far-court depth noise.
