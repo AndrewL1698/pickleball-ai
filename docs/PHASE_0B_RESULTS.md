@@ -309,6 +309,12 @@ and it reports something on 44% of frames where our ball is not visible. That is
 partial tracker, not a usable one, and it is exactly what a cross-sport transfer with no
 pickleball training data should be expected to look like.
 
+Watching the debug video (`ball_debug.mp4`) matches the numbers: during an exchange the
+marker sits on the real ball with a confidence around 0.4-0.5, and between exchanges the
+one-second trail zig-zags across the court as the tracker takes whatever distant
+candidate is left. It is recognisably following a pickleball, and it is not yet a
+trajectory.
+
 Runtime: about 33 frames/s on an M4 for detection plus post-processing, so a 3-minute
 window of 60 fps footage costs roughly 3 minutes of ball inference at 30 fps effective.
 
