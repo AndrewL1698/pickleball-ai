@@ -68,6 +68,12 @@ class IdentityConfig:
     near_position_noise_ft: float = 2.0
     far_position_noise_ft: float = 4.0
     box_height_jump_ratio: float = 1.5
+    # A standing person's box is taller than it is wide. Spectators leaning on a rail in
+    # front of the camera are detected head-and-shoulders only, which is wider than tall,
+    # and their feet project to a plausible court position, so geometry alone keeps them.
+    # Measured on this project's footage: on-court player boxes are above 1.13 at the 1st
+    # percentile, rail detections have a median of 0.71.
+    min_box_aspect: float = 1.1
     appearance_change_window: int = 15  # rows averaged on each side of a candidate split
     appearance_change_threshold: float = 0.45  # ~99.5th percentile within tracks on test clip
     max_gap_s: float = 30.0
@@ -114,7 +120,9 @@ def split_tracklets(
     detections: pd.DataFrame, source_fps: float, stride: int, config: IdentityConfig
 ) -> pd.DataFrame:
     """Tracked rows with smoothed court position, `segment_id`, and `tracklet_id` columns."""
-    rows = detections[detections["track_id"] >= 0].sort_values(["track_id", "frame_number"])
+    tracked = detections[detections["track_id"] >= 0]
+    aspect = (tracked["y2"] - tracked["y1"]) / (tracked["x2"] - tracked["x1"]).replace(0, np.nan)
+    rows = tracked[aspect >= config.min_box_aspect].sort_values(["track_id", "frame_number"])
     rows = rows.reset_index(drop=True)
     if rows.empty:
         return rows.assign(smooth_x=pd.Series(dtype=float), smooth_y=pd.Series(dtype=float),

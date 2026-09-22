@@ -254,3 +254,15 @@ def test_switch_margin_is_reported_per_player() -> None:
     link = diagnostics["games"][1]["switch_link"]
     assert set(link["player_margins"]) == {"1", "2", "3", "4"}
     assert all(v > 0 for v in link["player_margins"].values())
+
+
+def test_head_and_shoulders_boxes_are_not_players() -> None:
+    """A spectator leaning on the rail in front of the camera projects to a plausible
+    court position, so only the box shape separates them from a player."""
+    rows = four_players(range(0, 200, STRIDE))
+    spectator = walk(9, range(0, 200, STRIDE), (-4, -27), (-4, -27), shirt=5)
+    for row in spectator:  # head and shoulders only: wider than tall
+        row["x1"], row["x2"], row["y1"], row["y2"] = 800.0, 1140.0, 835.0, 1060.0
+    players = resolve(rows + spectator)
+    assert 9 not in set(players["track_id"])
+    assert set(players["player_id"]) == {1, 2, 3, 4}
