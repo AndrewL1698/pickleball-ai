@@ -44,18 +44,37 @@ Known limits: far-court positions are still noisy (feet hidden by the net or pos
 
 ### 0b - Broader feasibility
 
-- collect 3-10 representative phone-recorded match clips
-- standardize camera placement
-- measure player tracking (ID switches, coverage) on sampled frames
-- ~~link fragmented tracks into four persistent player identities~~ (first version done, see 0a revision); next: handle teams switching ends inside a window, reduce far-court position noise (e.g. pose keypoints for feet hidden by the net)
-- record a clip with the recommended behind-baseline, elevated setup and compare against the corner-camera test clip
-- test public/open-source pickleball or racket-sport ball trackers
-- manually annotate a short evaluation clip
-- decide initial ball-tracking baseline
+- ~~collect 3-10 representative match clips~~ (four fixed behind-baseline recordings, 14-79 min)
+- ~~standardize camera placement~~ (measured recommendation in `docs/PHASE_0B_RESULTS.md`)
+- ~~measure player tracking (ID switches, coverage) on sampled frames~~
+- ~~link fragmented tracks into four persistent player identities~~ (0a revision)
+- ~~handle teams switching ends inside a window~~ (manual changeover input; the window is
+  cut at it and players are linked across by clothing plus tracker continuity)
+- ~~compare behind-baseline recordings against the corner-camera test clip~~
+- ~~test public/open-source racket-sport ball trackers~~ (WASB chosen, alternatives and
+  licences recorded)
+- ~~manually annotate a short evaluation clip~~ (player and ball labels, tune/test split)
+- ~~decide initial ball-tracking baseline~~
 
 Exit criteria:
 
 A short clip can produce visibly reasonable player tracks and at least partial ball tracks.
+
+Status (2026-09-22): see `docs/PHASE_0B_RESULTS.md` for the full write-up, per-window
+metrics and the pass/fail assessment.
+
+Carried into later phases:
+
+- Identity across an end switch fails when both teams wear the same kit; the clothing
+  descriptor cannot separate partners (0.20 apart on a 0-1 scale, against 0.54-0.69 for
+  distinctly dressed teams). Needs user confirmation at each changeover (Phase 7) or a
+  stronger appearance model.
+- The ball baseline is a cross-sport transfer (tennis weights) and is only partially
+  usable: accurate when it fires, but it misses about half of visible balls and reports
+  something on a substantial share of ball-free frames. Phase 4 should fine-tune on
+  pickleball frames.
+- Far-court position noise on low cameras is unresolved; pose-based ground contact was
+  not tested.
 
 ---
 
