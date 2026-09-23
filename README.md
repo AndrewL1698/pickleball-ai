@@ -40,15 +40,21 @@ sampled windows, camera comparison across four fixed-camera matches, measured
 player-tracking metrics, and a first ball-tracking baseline. Results and the
 exit-criterion assessment are in `docs/PHASE_0B_RESULTS.md`.
 
-Phase 1 (full-stack skeleton) has started. Its first checkpoint adds the
-backend foundation: a FastAPI service that accepts a video upload, records it
-in PostgreSQL, stores the file behind a storage interface, and queues an
-analysis job that a Redis/RQ worker picks up and drives to completion. The
-processing itself is still a **placeholder** -- it fingerprints the file rather
-than analyzing it, so the plumbing can be finished before the expensive
-computer vision is wired in. There is no web app yet.
+Phase 1 (full-stack skeleton) is in progress. Two of its three checkpoints are
+done:
 
-See `docs/ROADMAP.md`, and `docs/BACKEND.md` for the backend in detail.
+- A FastAPI service that accepts a video upload, records it in PostgreSQL,
+  stores the file behind a storage interface, and queues an analysis job that a
+  Redis/RQ worker picks up and drives to completion (`docs/BACKEND.md`).
+- A Next.js app for uploading a video, listing what has been uploaded, and
+  following a job through its states (`docs/FRONTEND.md`).
+
+The processing itself is still a **placeholder**: it fingerprints the file
+rather than analysing it, so the plumbing could be finished before the
+expensive computer vision is wired in. The web app says so on the page rather
+than presenting a finished-looking result.
+
+See `docs/ROADMAP.md` for what remains.
 
 ## Development Setup
 
@@ -119,6 +125,42 @@ short message. Interactive API docs are at http://127.0.0.1:8000/docs.
 Uploads are written to `data/uploads/` (gitignored) under a generated key, never
 under the uploaded filename. Every environment variable, the full endpoint list,
 the migration commands and the current limitations are in `docs/BACKEND.md`.
+
+## Running the Frontend (Phase 1)
+
+The web app is a Next.js application in `apps/web`. It is a browser client for
+the API above, so start the backend first.
+
+```bash
+cd apps/web
+npm install
+cp .env.example .env.local      # defaults already point at a local API
+npm run dev                     # http://localhost:3000
+```
+
+Three pages: upload a video, see everything uploaded, and follow one video's
+processing job. The job page polls while the job is queued or running and stops
+once it is ready or failed.
+
+Without `uv run pbworker` running, an upload stays `queued` for ever: nothing
+else consumes the queue. The page says as much.
+
+```bash
+npm test                        # hermetic; needs no API and no network
+npm run lint
+npm run typecheck
+npm run build
+npm run check:contract          # needs the API up; catches type drift
+```
+
+Everything in containers instead, including the web app:
+
+```bash
+docker compose --profile app up -d --build
+```
+
+Full details, environment variables, the polling design and the current
+limitations are in `docs/FRONTEND.md`.
 
 ## Running the Phase 0 Pipeline
 
@@ -328,6 +370,10 @@ See `docs/DATA_MODEL.md`.
 ## Backend
 
 See `docs/BACKEND.md`.
+
+## Frontend
+
+See `docs/FRONTEND.md`.
 
 ## Project Scope
 

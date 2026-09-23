@@ -1,0 +1,17 @@
+# The repository root .gitignore covers node_modules, build output and .env;
+# these are the paths specific to this app.
+
+/.next/
+/.next-dev/
+/out/
+/coverage/
+.vercel
+
+# next/font and the route-type generator write here.
+next-env.d.ts
+
+# The root ignores .env* and un-ignores .env.example, but a nested .gitignore
+# is evaluated after it, so the negation has to be repeated here or the
+# template would never be staged.
+.env*
+!.env.example

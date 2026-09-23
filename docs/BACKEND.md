@@ -277,9 +277,8 @@ logged with their traceback and answered with one sentence.
 
 ## What Is Left
 
-Checkpoint 2 and 3 of Phase 1:
+Checkpoint 3 of Phase 1 (checkpoint 2 added the web app; see `FRONTEND.md`):
 
-- the Next.js app: match list, upload form, processing-status UI
 - a `Match` entity, so a video belongs to something calibrations can hang off
 - real video metadata extraction (fps, dimensions, duration, frame count,
   rotation) via `pickleball_ml.video.reader.read_metadata`, replacing the

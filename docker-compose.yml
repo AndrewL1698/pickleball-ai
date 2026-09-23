@@ -1,16 +1,16 @@
 # Backend dependencies for local development.
 #
 #   docker compose up -d postgres redis      # just the databases (the usual case)
-#   docker compose --profile app up -d       # ...plus the API and the worker
+#   docker compose --profile app up -d       # ...plus the API, worker and web app
 #
 # Postgres and Redis are published on 127.0.0.1 only. Both are unauthenticated
 # enough for development that binding them to every interface would put an open
 # database on whatever network the laptop is on.
 #
-# The API and worker containers are optional, and off by default. On Apple
+# The API, worker and web containers are optional, and off by default. On Apple
 # Silicon the worker will eventually need the GPU, which Docker on macOS cannot
-# reach, so the intended local setup is: dependencies in Docker, Python
-# natively (see README).
+# reach, so the intended local setup is: dependencies in Docker, Python and
+# Node natively (see README).
 
 name: pickleball
 
@@ -67,6 +67,21 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  web:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Build args, not environment: NEXT_PUBLIC_ values are inlined into the
+        # browser bundle when the image is built. The browser resolves this, so
+        # it is localhost even though the API is `api` on this network.
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
 
   worker:
     profiles: ["app"]

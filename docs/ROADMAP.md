@@ -123,11 +123,22 @@ The processing is a **placeholder** that fingerprints the file rather than
 analyzing it, so the exit criterion is not met yet: there is no web app, and no
 `Match` entity.
 
+Status (2026-09-23): checkpoint 2 of 3 done - the upload and status interface.
+A Next.js App Router app (`apps/web`) with three pages: upload a video by
+picker or drag-and-drop with validation before and after submission, a list of
+everything uploaded with its latest job status, and a per-video status page
+that polls only while the job is non-terminal. Typed API client, hermetic
+Vitest suite plus an opt-in suite against the running stack. Details in
+`docs/FRONTEND.md`.
+
+The collection is called "Videos", not "Matches": `Match` does not exist yet.
+The UI states plainly that no analysis is performed.
+
 Remaining:
 
-- checkpoint 2: Next.js app, match list, upload form, processing-status UI
 - checkpoint 3: `Match` entity, real metadata extraction in the worker
-  (`pickleball_ml.video.reader.read_metadata`), video playback in the app
+  (`pickleball_ml.video.reader.read_metadata`), serving uploaded video back for
+  playback, and a browser-driven test of the upload interaction
 
 ---
 
