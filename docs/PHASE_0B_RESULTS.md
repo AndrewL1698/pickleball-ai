@@ -141,40 +141,78 @@ rather than guessed, which is why some windows have fewer labeled frames than ex
 | `riggs_b` | test | 9 | 35 | 0.89 | 1.00 | 8 / 5 | 0 | 0 of 27 |
 | `pro63_hard` | test | 8 | 26 | **0.85** | **0.82** | 6 / 4 | 5 | **4 of 18** |
 
-Pooled (counts summed, not averaged over windows):
-
-| Split | Visible labels | Coverage | Identity accuracy when detected | ID switches |
-|---|---|---|---|---|
-| tune | 166 | 0.904 | 0.947 | 2 of 134 |
-| **test (held out)** | 151 | **0.861** | **0.969** | **4 of 110** |
-
 "Coverage" is the share of labeled visible players that a predicted player box matched at
 IoU 0.5 or better. "Identity accuracy" is, of those matches, the share whose predicted
 player ID maps to the right person under the single best one-to-one mapping for the
 window. "Extra predictions" are predicted player boxes in a labeled frame matching no
 labeled player.
 
-### The held-out hard clip, and an honest note about it
+### Three different pooled numbers, and which is which
 
-`pro63_hard` is the one window that was genuinely hard, and it is worth separating what
-it measured from what happened next.
+`pro63_hard` is the window that exposed the spectator-rail bug and so motivated the
+box-shape fix described below. That makes it a different kind of evidence from the other
+four test windows, and the three figures below must not be conflated. All counts are
+summed across windows, not averaged.
 
-**As measured, before any change:** coverage 0.58, identity accuracy 0.73, 14 extra
-predictions, 4 ID switches. Reviewing the predictions showed one "player" parked at 27 ft
-behind the baseline for the entire window with its box cut off by the bottom of the
-frame: the camera sits behind a spectator rail, the spectators' heads are detected as
-people, and their feet project to a plausible court position, so the court gate kept
-them.
+**A. Four untouched test windows, final pipeline.** `gold_mid`, `gold_late`, `buzz_b`,
+`riggs_b`. None of these influenced any configuration or code decision, and the numbers
+are what the pipeline produces today.
+
+| Visible labels | Coverage | Identity accuracy | ID switches | Extra predictions |
+|---|---|---|---|---|
+| 125 | **0.864** | **1.000** | **0 of 92** | 2 |
+
+**B. All five test-designated windows, final pipeline.** Adds `pro63_hard` as it scores
+after the fix. This is the pipeline's current performance on everything labeled `test`,
+but it is **not** a clean held-out result, because one of its five windows motivated a
+change to the code being measured.
+
+| Visible labels | Coverage | Identity accuracy | ID switches | Extra predictions |
+|---|---|---|---|---|
+| 151 | 0.861 | 0.969 | 4 of 110 | 7 |
+
+**C. `pro63_hard` as a genuine holdout, before it changed anything.** The only fully
+uncontaminated measurement of that window, taken against the pipeline as it stood when
+the window was first opened.
+
+| Visible labels | Coverage | Identity accuracy | ID switches | Extra predictions |
+|---|---|---|---|---|
+| 26 | 0.577 | 0.733 | 4 of 12 | 14 |
+
+For completeness, the tuning windows pool to 166 labels, 0.904 coverage, 0.947 identity
+accuracy and 2 ID switches in 134 opportunities. Those windows were used to choose
+configuration and carry no held-out claim at all.
+
+The honest summary is that **A** is the number to quote for "how well does this work on
+data it has never influenced", **B** is the number to quote for "how well does it work
+across every labeled test window today", and **C** is what the hardest camera looked like
+before anyone had seen it fail.
+
+### The hard clip, and why it is no longer a holdout
+
+`pro63_hard` was the only window that failed badly, and what happened next cost it its
+status as held-out data.
+
+**As a genuine holdout, before any change** (figure C above): coverage 0.577, identity
+accuracy 0.733, 14 extra predictions, 4 ID switches in 12 opportunities. Reviewing the
+predictions showed one "player" parked at 27 ft behind the baseline for the entire
+window with its box cut off by the bottom of the frame: the camera sits behind a
+spectator rail, the spectators' heads are detected as people, and their feet project to
+a plausible court position, so the court gate kept them.
 
 **After the fix that window motivated** (player selection now requires a box taller than
-it is wide): coverage 0.85, identity accuracy 0.82, 5 extra predictions, 4 ID switches.
+it is wide): coverage 0.846, identity accuracy 0.818, 5 extra predictions, 4 ID switches.
 
-The table above reports the second set, because that is what the code now does, but the
-first set is the honest held-out measurement of the pipeline as it stood when the window
-was opened. This window is no longer a clean held-out sample and should not be counted
-as one again. The other four test windows were not used to choose anything; the fix
-shifted `gold_mid` by 3 points and `riggs_a`/`gold_early` by 1-3 points, in both
-directions, because a lunging player is briefly wider than tall.
+The per-window table reports the second set, because that is what the code now does. The
+first set is the only uncontaminated measurement of this window, and this window must not
+be counted as clean held-out evidence again.
+
+The other four test windows influenced nothing and remain untouched, but their numbers
+did move slightly when the fix landed, because it also removes the occasional genuine
+detection of a lunging player who is briefly wider than tall: `gold_mid` fell 3 points,
+`gold_early` and `riggs_a` 1-3 points, in both directions. Pooled over those four
+windows the change was 0.872 to 0.864 coverage, with identity accuracy and ID switches
+unchanged at 1.000 and zero.
 
 ### What the failures are
 
@@ -393,9 +431,13 @@ window of 60 fps footage costs roughly 3 minutes of ball inference at 30 fps eff
 
 ## 7. Recommendation for the next phase
 
-- **Player tracking is good enough to build on.** Held-out coverage 0.87 and identity
-  accuracy 1.00 with zero ID switches, on four windows of three matches, is a working
-  base for the top-down reconstruction and movement analytics of Phases 3 and 6.
+- **Player tracking is good enough to build on.** On the four untouched test windows
+  (figure A: 0.864 coverage, 1.000 identity accuracy, zero ID switches in 92
+  opportunities, three matches) this is a working base for the top-down reconstruction
+  and movement analytics of Phases 3 and 6. Across all five test-designated windows
+  under the final pipeline (figure B) it is 0.861 coverage and 0.969 identity accuracy,
+  which is the figure to plan against, since the fifth window is the kind of camera a
+  real user might hand us.
 - **Ball tracking is not, yet.** Keep WASB as the interface-compatible baseline and plan
   Phase 4 around fine-tuning it on pickleball frames. The labeling workflow needed to do
   that now exists; the cheapest next step is many more ball labels on `buzz` and
@@ -411,16 +453,23 @@ window of 60 fps footage costs roughly 3 minutes of ball inference at 30 fps eff
 > tracks."
 
 **Player tracks: met.** Across nine labeled windows of four matches, 86-90% of visible
-players are matched by a predicted player box, and of those matches 95% (tuning) and 97%
-(held out) carry the right identity. Held-out windows show 4 ID switches in 110
-opportunities, all four in the single hardest window. The rendered top-down video for a
-held-out window puts the near players on the near baseline and the far players where they
-actually stand.
+players are matched by a predicted player box. On the four test windows that influenced
+nothing, every one of those matches carries the right identity and there are no ID
+switches at all. Adding the fifth test window, whose earlier failure motivated the
+box-shape fix, gives 0.861 coverage and 0.969 identity accuracy with 4 ID switches, all
+four inside that one window. The rendered top-down video for a test window puts the near
+players on the near baseline and the far players where they actually stand.
 
-| | Visible labels | Coverage | Identity accuracy | ID switches |
+| Set | Visible labels | Coverage | Identity accuracy | ID switches |
 |---|---|---|---|---|
-| tuning windows | 166 | 0.904 | 0.947 | 2 of 134 |
-| held-out windows | 151 | 0.861 | 0.969 | 4 of 110 |
+| Tuning windows (4) | 166 | 0.904 | 0.947 | 2 of 134 |
+| **A. Untouched test windows (4)** | 125 | **0.864** | **1.000** | **0 of 92** |
+| B. All test-designated windows (5), final pipeline | 151 | 0.861 | 0.969 | 4 of 110 |
+| C. `pro63_hard` as a genuine holdout, pre-fix | 26 | 0.577 | 0.733 | 4 of 12 |
+
+Row B is the pipeline's current performance on every labeled test window; it is not a
+clean held-out result, because `pro63_hard` motivated a change to the code it measures.
+Row A is the strongest held-out claim this phase can make.
 
 **Ball tracks: met, narrowly, and only as "partial".** On the one window with blind ball
 labels the tracker reports a position on 64% of frames where the ball is visible and is
@@ -443,8 +492,11 @@ Phase 6 (movement analytics) depend only on the player half, which is comfortabl
 
 ### What the numbers do not cover
 
-- **Ball labels exist for one window only** (14 visible, 16 absent frames). Every ball
+- **Ball labels exist for one window only** (14 visible, 16 absent frames), and that
+  window is a tuning window. There is no held-out ball measurement at all. Every ball
   figure in this document rests on that sample or on review of the tracker's own output.
+- **`pro63_hard` is spent as held-out data.** Any future claim about unseen footage needs
+  a window nobody has looked at yet.
 - **`gold` has no ball labels at all**: at 5.7 ft of camera height the ball is a few
   pixels across and the labeling method could not resolve it.
 - **ID switches are only visible at the label spacing** (10-20 s). A swap that corrects

@@ -60,11 +60,23 @@ Exit criteria:
 
 A short clip can produce visibly reasonable player tracks and at least partial ball tracks.
 
-Status (2026-09-22): **passed**. Nine windows of four matches; on held-out windows 86%
-of visible players are detected and 97% of those carry the right identity, with 4 ID
-switches in 110 opportunities. Ball tracking is partial: 50% recall at 20 px with 6 px
-median error where it fires, and a 3-4 second gap in every window. Full write-up,
-per-window metrics and the pass/fail reasoning in `docs/PHASE_0B_RESULTS.md`.
+Status (2026-09-22): **passed**. Nine labeled windows across four matches.
+
+- On the four test windows that influenced no decision, 86.4% of visible players are
+  detected and every one of those carries the right identity, with no ID switches in 92
+  opportunities.
+- Across all five test-designated windows under the final pipeline, 86.1% coverage and
+  96.9% identity accuracy with 4 ID switches in 110 opportunities. This is not a clean
+  held-out figure: the fifth window, `pro63_hard`, motivated the box-shape fix it is
+  measured against.
+- `pro63_hard` as a genuine holdout, before it changed anything: 57.7% coverage, 73.3%
+  identity accuracy, 14 extra predictions, 4 ID switches.
+- Ball tracking is partial: 50% recall at 20 px with 6 px median error where it fires,
+  and a 3-4 second gap in every window. The only ball labels are on a tuning window, so
+  there is no held-out ball measurement.
+
+Full write-up, per-window metrics and the pass/fail reasoning in
+`docs/PHASE_0B_RESULTS.md`.
 
 Carried into later phases:
 
@@ -80,6 +92,8 @@ Carried into later phases:
   not tested.
 - Position accuracy in court feet was never measured against a known ground-truth
   position, only calibration reprojection error.
+- `pro63_hard` is spent as held-out data. Judging unseen footage again needs a window
+  that has not been looked at.
 
 ---
 
