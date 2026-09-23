@@ -16,6 +16,9 @@ class JobErrorCode(enum.StrEnum):
     MISSING_VIDEO_FILE = "missing_video_file"
     UNREADABLE_VIDEO = "unreadable_video"
     ENQUEUE_FAILED = "enqueue_failed"
+    #: Reserved for the reaper that does not exist yet: a worker killed
+    #: mid-job leaves its row in `running` for ever. Nothing writes this code
+    #: today, and `docs/BACKEND.md` lists the gap.
     ABANDONED = "abandoned"
     INTERNAL = "internal"
 
@@ -36,7 +39,3 @@ class JobFailure(Exception):
         self.code = code
         self.detail = detail  # logged, never persisted or returned
         super().__init__(f"{code}: {detail}" if detail else str(code))
-
-    @property
-    def message(self) -> str:
-        return JOB_ERROR_MESSAGES[self.code]

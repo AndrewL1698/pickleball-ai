@@ -2,33 +2,61 @@
 
 import Link from "next/link";
 import { useCallback } from "react";
-import { listVideos } from "@/lib/api";
+import { type ApiError, listVideos } from "@/lib/api";
 import { formatBytes } from "@/lib/files";
 import { formatTimestamp } from "@/lib/format";
 import type { VideoList } from "@/lib/types";
 import { usePolledResource } from "@/hooks/usePolledResource";
 import { Notice } from "./Notice";
+import { RefreshButton } from "./RefreshButton";
 import { Spinner } from "./Spinner";
 import { StatusBadge } from "./StatusBadge";
 
-/**
- * The list reuses the polling hook with `shouldContinue` fixed to false: it
- * wants the fetch-once, keep-the-last-value, retry-by-hand behaviour, just
- * without the timer. Writing a second loader would have duplicated the
- * cancellation and error handling for no benefit.
- */
-const FETCH_ONCE = () => false;
-
 export function VideoListView() {
   const fetcher = useCallback((signal: AbortSignal) => listVideos(signal), []);
-  const { data, error, isLoading, isFetching, refresh } = usePolledResource<VideoList>(
-    fetcher,
-    { shouldContinue: FETCH_ONCE },
-  );
+  // No `shouldContinue`, so the hook fetches once and stops. The list wants
+  // everything else it provides: cancellation on unmount, the keep-the-last-
+  // value error handling, and a manual retry.
+  const { data, error, isLoading, isRefreshing, refresh } =
+    usePolledResource<VideoList>(fetcher, {});
 
+  return (
+    <>
+      {/*
+        Mounted in every branch, so assistive technology registers the region
+        before it has anything to say. A region inserted together with its
+        first message is frequently not announced.
+      */}
+      <p role="status" className="sr-only">
+        {announcement(isLoading, error, data?.videos.length)}
+      </p>
+      <Body
+        data={data}
+        error={error}
+        isLoading={isLoading}
+        isRefreshing={isRefreshing}
+        refresh={refresh}
+      />
+    </>
+  );
+}
+
+function Body({
+  data,
+  error,
+  isLoading,
+  isRefreshing,
+  refresh,
+}: {
+  data: VideoList | null;
+  error: ApiError | null;
+  isLoading: boolean;
+  isRefreshing: boolean;
+  refresh: () => void;
+}) {
   if (isLoading) {
     return (
-      <p role="status" className="flex items-center gap-2 text-muted">
+      <p className="flex items-center gap-2 text-muted">
         <Spinner />
         Loading your videos…
       </p>
@@ -38,21 +66,15 @@ export function VideoListView() {
   if (error !== null || data === null) {
     return (
       <div className="space-y-3">
-        <Notice tone="error" role="alert" title="We could not load your videos.">
-          <p>{error?.message ?? "Something went wrong."}</p>
-          {error ? <p className="mt-1 text-xs opacity-80">Error code: {error.code}</p> : null}
-        </Notice>
-        <button
-          type="button"
-          aria-disabled={isFetching}
-          onClick={() => {
-            if (!isFetching) refresh();
-          }}
-          className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-lg border border-border-subtle px-4 font-medium aria-disabled:cursor-default aria-disabled:opacity-60"
+        <Notice
+          tone="error"
+          role="alert"
+          title="We could not load your videos."
+          code={error?.code}
         >
-          {isFetching ? <Spinner /> : null}
-          Try again
-        </button>
+          <p>{error?.message ?? "Something went wrong."}</p>
+        </Notice>
+        <RefreshButton label="Try again" isRefreshing={isRefreshing} onRefresh={refresh} />
       </div>
     );
   }
@@ -112,4 +134,16 @@ export function VideoListView() {
       ))}
     </ul>
   );
+}
+
+/** What a screen reader hears as the list moves between its states. */
+function announcement(
+  isLoading: boolean,
+  error: ApiError | null,
+  count: number | undefined,
+): string {
+  if (isLoading) return "Loading videos.";
+  if (error !== null || count === undefined) return "Could not load your videos.";
+  if (count === 0) return "No videos yet.";
+  return `${count} ${count === 1 ? "video" : "videos"} loaded.`;
 }

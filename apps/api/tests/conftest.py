@@ -11,13 +11,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import Connection, Engine, create_engine, event
+from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-from tests_support_api import ALEMBIC_INI
 
 from pickleball_api.config import Settings
 from pickleball_api.db import get_session
@@ -25,44 +21,14 @@ from pickleball_api.dependencies import get_queue, get_storage
 from pickleball_api.main import create_app
 from pickleball_api.queue import RecordingJobQueue
 from pickleball_api.storage import LocalFileStorage
-
-
-def migrate(connection: Connection) -> None:
-    """Run every migration on an open connection.
-
-    Handing Alembic the connection is what lets an in-memory SQLite database be
-    migrated at all: it exists only as long as its connection does.
-    """
-    config = Config(str(ALEMBIC_INI))
-    config.attributes["connection"] = connection
-    command.upgrade(config, "head")
+from pickleball_api.testing import migrated_sqlite_engine
 
 
 @pytest.fixture
 def engine() -> Iterator[Engine]:
-    """One in-memory SQLite database per test, with the schema migrated in.
-
-    `StaticPool` plus `check_same_thread=False` keeps every connection pointed
-    at the same database: `sqlite://` otherwise hands out a fresh empty one per
-    connection, and FastAPI runs synchronous routes on a worker thread.
-    """
-    engine = create_engine(
-        "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
-    )
-
-    @event.listens_for(engine, "connect")
-    def _enforce_foreign_keys(dbapi_connection: object, _record: object) -> None:
-        # Off by default in SQLite, which would make the tests more permissive
-        # than production -- the one direction that is never acceptable.
-        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
-    with engine.connect() as connection:
-        migrate(connection)
-        connection.commit()
-    yield engine
-    engine.dispose()
+    """One migrated in-memory SQLite database per test."""
+    with migrated_sqlite_engine() as engine:
+        yield engine
 
 
 @pytest.fixture
@@ -82,6 +48,9 @@ def settings(tmp_path: Path) -> Settings:
         environment="test",
         upload_dir=tmp_path / "uploads",
         max_upload_bytes=1024 * 1024,
+        # The host Starlette's TestClient sends. It is supplied here rather
+        # than shipped in the production default.
+        trusted_hosts=("localhost", "127.0.0.1", "testserver"),
     )
 
 

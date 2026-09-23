@@ -5,6 +5,7 @@
  * built on an invented payload proves nothing about the real contract.
  */
 
+import { type ReactNode, createElement } from "react";
 import type { Job, VideoDetail, VideoSummary } from "@/lib/types";
 
 export const JOB_QUEUED: Job = {
@@ -66,6 +67,26 @@ export function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+/**
+ * The `next/link` stub every component test needs.
+ *
+ * Several tests assert the row really is an anchor, so the stub has to render
+ * one. Exported rather than repeated, so a fifth test file cannot quietly
+ * diverge; each file still calls `vi.mock("next/link", nextLinkMock)` itself,
+ * because `vi.mock` is hoisted per file.
+ */
+export function nextLinkMock() {
+  return {
+    default: ({ children, href }: { children: ReactNode; href: string }) =>
+      createElement("a", { href }, children),
+  };
+}
+
+/** Wait, when a test needs real time to pass. */
+export function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** A video file that passes client-side validation. */

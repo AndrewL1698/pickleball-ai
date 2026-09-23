@@ -18,7 +18,8 @@ getting right on its own, and it can be tested in milliseconds rather than
 minutes. The real processor replaces one object behind one interface
 (`pickleball_worker.processors.VideoProcessor`).
 
-There is also no frontend, no authentication, and no `Match` entity yet.
+There is no authentication and no `Match` entity yet. The web app that drives
+this API arrived in checkpoint 2; see `FRONTEND.md`.
 
 ## Directory Structure
 
@@ -28,7 +29,7 @@ apps/api/                              # package `pickleball_api`
 ├── Dockerfile                         # shared by the api and worker compose services
 ├── migrations/
 │   ├── env.py                         # reads the URL from settings unless given one
-│   └── versions/0001_video_and_analysis_job.py
+│   └── versions/                      # 0001 the tables, 0002 the enum CHECK constraints
 ├── src/pickleball_api/
 │   ├── config.py                      # typed settings, and the extension allowlist
 │   ├── db.py                          # engine, session factory, request/worker sessions
@@ -39,7 +40,9 @@ apps/api/                              # package `pickleball_api`
 │   ├── models.py                      # SQLAlchemy tables: Video, AnalysisJob
 │   ├── queue.py                       # JobQueue interface, RQ and recording implementations
 │   ├── schemas.py                     # Pydantic response models
+│   ├── limits.py                      # refuses an oversized body before it is read
 │   ├── storage.py                     # Storage interface, local filesystem implementation
+│   ├── testing.py                     # fixtures both test suites share
 │   ├── uploads.py                     # filename hygiene, allowlist, format sniffing
 │   ├── routers/{health,videos,jobs}.py
 │   └── __main__.py                    # `pbapi`
@@ -101,9 +104,10 @@ Two tables. `videos`:
 `progress` (0.0-1.0, with a CHECK), `error_code`, `error_message`, `created_at`,
 `started_at`, `finished_at`.
 
-`status` and `stage` are stored as `VARCHAR` plus a CHECK constraint rather than
-native PostgreSQL enums, so that adding a member does not need a type migration
-and so the same migration runs on the SQLite database the tests use.
+`status` and `stage` are stored as `VARCHAR` plus a CHECK constraint (added in
+migration `0002`) rather than native PostgreSQL enums, so that adding a member
+does not need a type migration and so the same migration runs on the SQLite
+database the tests use.
 
 ### Relationship to `DATA_MODEL.md`
 
@@ -207,7 +211,7 @@ Every variable is prefixed `PICKLEBALL_` and read by both processes. Copy
 | `PICKLEBALL_MAX_UPLOAD_BYTES` | `2147483648` | 2 GiB |
 | `PICKLEBALL_ALLOWED_VIDEO_EXTENSIONS` | `[".mp4",".mov",".m4v"]` | Each needs a `VIDEO_CONTENT_TYPES` entry |
 | `PICKLEBALL_CORS_ORIGINS` | `["http://localhost:3000", ...]` | The Next.js dev server |
-| `PICKLEBALL_TRUSTED_HOSTS` | `["localhost","127.0.0.1","testserver"]` | Host header allowlist |
+| `PICKLEBALL_TRUSTED_HOSTS` | `["localhost","127.0.0.1"]` | Host header allowlist |
 
 The two URLs are `SecretStr`, so a settings repr in a log or an exception prints
 `**********` rather than the password.
@@ -217,12 +221,21 @@ The two URLs are `SecretStr`, so a settings repr in a log or an exception prints
 Alembic, always. Nothing creates tables at startup, so a missing migration fails
 loudly rather than being papered over.
 
+Run these from the repository root. `upload_dir` and `.env` are both resolved
+relative to the working directory, so a command run from elsewhere quietly uses
+a different database and a different upload directory. Both the API and the
+worker log the upload directory they resolved, which is the quickest way to
+confirm it.
+
 ```bash
 uv run alembic -c apps/api/alembic.ini upgrade head
 uv run alembic -c apps/api/alembic.ini downgrade -1
 uv run alembic -c apps/api/alembic.ini current
 uv run alembic -c apps/api/alembic.ini revision --autogenerate -m "what changed"
 ```
+
+Alembic does not autogenerate CHECK constraints, so a change to `JobStatus` or
+`JobStage` needs its migration written by hand; `0002` is the pattern.
 
 `env.py` takes the URL from the application settings unless one is already
 configured, so the migrations always target the same database the API does, and
@@ -233,9 +246,17 @@ before committing it.
 
 ```bash
 docker compose up -d postgres redis     # the usual case
-docker compose --profile app up -d      # ...plus containerized api and worker
+docker compose --profile app up -d      # ...plus migrate, api, worker and web
 docker compose down                     # stop; add -v to discard the data
 ```
+
+The `app` profile runs the migrations itself: a one-shot `migrate` service
+applies them, and `api` and `worker` wait for it to exit successfully. Nothing
+needs running by hand on the host.
+
+Note that the two paths keep their uploads in different places. A host process
+writes `data/uploads`; the containers share a Docker volume. A video uploaded
+one way is a `missing_video_file` job the other way.
 
 Both are published on `127.0.0.1` only. PostgreSQL is on **5433**, not 5432, so
 it does not collide with a PostgreSQL already installed on the machine.
@@ -261,6 +282,44 @@ covers the real RQ adapter against `fakeredis`.
 The integration tests apply the migrations to a throwaway PostgreSQL database,
 compare the result against the models (catching a model edited without a new
 migration), and roll it back again.
+
+## Troubleshooting
+
+**Jobs stay `queued` for ever.** Nothing is consuming the queue: start
+`uv run pbworker`, or `docker compose --profile app up -d worker`. The status
+page says as much rather than pretending something is happening.
+
+**Every job fails with `missing_video_file`.** The API and the worker resolved
+different upload directories. `PICKLEBALL_UPLOAD_DIR` defaults to the relative
+`data/uploads`, so a process started from another directory writes somewhere
+else. Both log the absolute path they resolved at startup; compare them. This
+also happens when a video is uploaded through the host API and a containerised
+worker looks for it, or vice versa — the two paths do not share storage.
+
+**`relation "videos" does not exist`, or every API call 500s.** The migrations
+have not been applied: `uv run alembic -c apps/api/alembic.ini upgrade head`.
+Nothing creates tables at startup on purpose. In the container path the
+`migrate` service does this, so check `docker compose logs migrate`.
+
+**`bind: address already in use` on 5432.** Something else, usually a
+Homebrew PostgreSQL, already has the port. The compose file publishes 5433 for
+exactly this reason, so nothing needs stopping — but a `PICKLEBALL_DATABASE_URL`
+pointing at 5432 will reach the other server.
+
+**`PermissionError` writing to `/data/uploads` in Docker.** The named volume was
+created by an older image that ran as root, and Docker keeps a volume's
+ownership once it exists. `docker compose --profile app down -v` recreates it.
+
+**The browser shows "Could not reach the API".** Either the API is not running,
+or its CORS list does not include the page's origin. The default allows
+`http://localhost:3000` and `http://127.0.0.1:3000`; a different port needs
+`PICKLEBALL_CORS_ORIGINS`. Note that `localhost` and `127.0.0.1` are different
+origins to a browser.
+
+**A request returns `Invalid host header` as plain text.** `TrustedHostMiddleware`
+rejected the `Host` header, and it answers before the JSON error handlers, so
+this one response is not in the usual error shape. Add the host to
+`PICKLEBALL_TRUSTED_HOSTS`.
 
 ## Security Notes
 
@@ -289,11 +348,24 @@ Checkpoint 3 of Phase 1 (checkpoint 2 added the web app; see `FRONTEND.md`):
 Known gaps in what is here:
 
 - **Nothing re-queues a job whose enqueue failed.** It is marked `failed` and
-  visible, but there is no retry endpoint and no sweeper.
-- **A job whose worker is killed stays `running` forever.** There is no reaper.
+  visible, but there is no retry endpoint and no sweeper, so the
+  `failed -> queued` transition the state machine allows is unreachable over
+  HTTP.
 - **No authentication or per-user authorization.** Every video is visible to
   anyone who can reach the port.
 - **No deletion endpoint**, which `ARCHITECTURE.md` requires for privacy.
-- Starlette spools the whole upload to a temporary file before the route sees
-  it, so the size limit bounds what is stored, not what is buffered. A
-  production deployment needs a body limit at the reverse proxy too.
+- **The size limit bounds what is stored more tightly than what is buffered.**
+  An upload declaring an oversized `Content-Length` is refused by middleware
+  before the body is read, which covers every ordinary client. A chunked
+  request declares no length, and Starlette spools it to a temporary file
+  before the route can count bytes -- so nothing oversized is ever *stored*,
+  but the disk cost of receiving it has been paid. A deployment should also set
+  a body limit at its reverse proxy.
+- **A worker killed mid-job leaves its row in `running` for ever.** There is no
+  reaper; `JobErrorCode.ABANDONED` is reserved for one and is currently unused.
+  The same applies to a crash between the commit and the enqueue, which leaves
+  a `queued` row with nothing on the queue.
+- **Redis is trusted.** RQ deserializes job metadata with pickle, so a reachable
+  Redis is worker code execution. The queue payload is only an opaque job id
+  and everything else is re-read from PostgreSQL, so a tampered message can at
+  worst re-run a real job -- but Redis must stay on the loopback interface.

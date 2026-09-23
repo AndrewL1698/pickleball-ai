@@ -255,3 +255,43 @@ def test_an_upload_is_refused_when_the_disk_is_nearly_full(
     assert response.status_code == 507
     assert response.json()["error_code"] == "insufficient_storage"
     assert list(storage.root.iterdir()) == []
+
+
+def test_an_oversize_upload_is_refused_before_its_body_is_read(
+    client: TestClient, settings: Settings, storage: LocalFileStorage
+) -> None:
+    """A declared Content-Length over the limit is rejected up front.
+
+    The route's own counting check would also catch this, but only after the
+    ASGI server had already written every byte to a temporary file.
+    """
+    response = client.post(
+        "/api/videos",
+        files={"file": ("huge.mp4", b"x" * 100, "video/mp4")},
+        headers={"Content-Length": str(settings.max_upload_bytes + 1)},
+    )
+    assert response.status_code == 413
+    assert response.json()["error_code"] == "upload_too_large"
+    assert list(storage.root.iterdir()) == []
+
+
+def test_a_small_upload_is_accepted_when_the_disk_has_room_for_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Free space is measured against this upload, not against the maximum.
+
+    Sizing the check to `max_upload_bytes` refused every upload, however small,
+    once free space fell below twice the configured limit.
+    """
+    monkeypatch.setattr(
+        LocalFileStorage, "free_bytes", lambda self: 512 * 1024 * 1024
+    )
+    assert upload(client, "tiny.mp4", size=4096).status_code == 201
+
+
+def test_a_long_filename_keeps_its_extension(client: TestClient) -> None:
+    """Truncating the whole name would drop the suffix and make a valid file
+    look like an unsupported type."""
+    response = upload(client, "a" * 250 + ".mp4")
+    assert response.status_code == 201
+    assert response.json()["original_filename"].endswith(".mp4")

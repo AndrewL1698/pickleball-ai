@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     allowed_video_extensions: tuple[str, ...] = tuple(VIDEO_CONTENT_TYPES)
 
     cors_origins: tuple[str, ...] = ("http://localhost:3000", "http://127.0.0.1:3000")
-    trusted_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "testserver")
+    trusted_hosts: tuple[str, ...] = ("localhost", "127.0.0.1")
 
     @field_validator("allowed_video_extensions", mode="after")
     @classmethod
@@ -66,11 +66,6 @@ class Settings(BaseSettings):
                 f"no content type is defined for {unknown}; add it to VIDEO_CONTENT_TYPES"
             )
         return normalized
-
-    @property
-    def is_production(self) -> bool:
-        return self.environment == "production"
-
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

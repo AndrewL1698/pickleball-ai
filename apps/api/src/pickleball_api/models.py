@@ -84,6 +84,10 @@ def _enum_column(enum_class: type[enum.StrEnum], name: str) -> Enum:
         enum_class,
         name=name,
         native_enum=False,
+        # SQLAlchemy defaults this to False for a non-native enum, so without
+        # it the column is a bare VARCHAR and the constraint the docstring
+        # promises does not exist.
+        create_constraint=True,
         validate_strings=True,
         values_callable=lambda e: [member.value for member in e],
     )

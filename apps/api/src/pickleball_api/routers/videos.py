@@ -4,16 +4,17 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 
 from pickleball_api import jobs, uploads
+from pickleball_api.config import MEGABYTE
 from pickleball_api.dependencies import QueueDep, SessionDep, SettingsDep, StorageDep
 from pickleball_api.errors import JobErrorCode
+from pickleball_api.limits import content_length_of, too_large_message
 from pickleball_api.models import AnalysisJob, JobStage, JobStatus, Video
 from pickleball_api.queue import QueueUnavailable
 from pickleball_api.schemas import VideoDetail, VideoList, VideoSummary
 from pickleball_api.storage import (
-    BoundedStorage,
     ObjectTooLarge,
     Storage,
     discard_on_error,
@@ -24,9 +25,32 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 
+#: Slack left free after an upload, so the disk does not end up at exactly 0.
+STORAGE_HEADROOM_BYTES = 256 * MEGABYTE
+
+
+def _require_room(storage: Storage, declared: int | None, limit: int) -> None:
+    """Refuse an upload the disk cannot hold.
+
+    A match is often several gigabytes, so filling the disk is an ordinary
+    Tuesday rather than an attack. The check is sized to this request where the
+    client declared a length: sizing it to the configured maximum instead would
+    refuse a 4 KB upload whenever free space fell below the 2 GiB limit.
+    """
+    free = storage.free_bytes()
+    if free is None:
+        return
+    needed = min(declared, limit) if declared else limit
+    if free < needed + STORAGE_HEADROOM_BYTES:
+        raise HTTPException(
+            status.HTTP_507_INSUFFICIENT_STORAGE,
+            detail="There is not enough free space to accept this upload.",
+        )
+
 
 @router.post("", response_model=VideoDetail, status_code=status.HTTP_201_CREATED)
 def upload_video(
+    request: Request,
     session: SessionDep,
     settings: SettingsDep,
     storage: StorageDep,
@@ -52,7 +76,7 @@ def upload_video(
         extension = uploads.video_extension(filename, settings.allowed_video_extensions)
     except uploads.UploadRejected as exc:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=exc.detail) from exc
-    _require_room(storage, settings.max_upload_bytes)
+    _require_room(storage, content_length_of(request), settings.max_upload_bytes)
 
     storage_key = new_storage_key(extension)
     try:
@@ -62,7 +86,7 @@ def upload_video(
     except ObjectTooLarge as exc:
         raise HTTPException(
             status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"The video is larger than the {settings.max_upload_bytes} byte limit.",
+            detail=too_large_message(settings.max_upload_bytes),
         ) from exc
     except uploads.UploadRejected as exc:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=exc.detail) from exc
@@ -95,7 +119,10 @@ def upload_video(
             detail="The video was stored but could not be queued for processing.",
         ) from None
 
-    session.refresh(video)
+    # No refresh before serializing: the session does not expire on commit, and
+    # `id` and `created_at` are Python-side defaults, so every field the
+    # response reads is already populated. Refreshing cost two more queries --
+    # the reload, plus a lazy load of `jobs` that the refresh had expired.
     return VideoDetail.of(video)
 
 
@@ -114,15 +141,3 @@ def read_video(session: SessionDep, video_id: UUID) -> VideoDetail:
     return VideoDetail.of(video)
 
 
-def _require_room(storage: Storage, needed: int) -> None:
-    """Refuse an upload the disk cannot hold.
-
-    A match is often several gigabytes, so filling the disk is an ordinary
-    Tuesday rather than an attack. Headroom of twice the limit covers the
-    `.part` file plus whatever the ASGI server has already spooled.
-    """
-    if isinstance(storage, BoundedStorage) and storage.free_bytes() < needed * 2:
-        raise HTTPException(
-            status.HTTP_507_INSUFFICIENT_STORAGE,
-            detail="There is not enough free space to accept this upload.",
-        )

@@ -37,6 +37,7 @@ apps/web/
 │   ├── StatusBadge.tsx         # word + glyph + colour, never colour alone
 │   ├── PlaceholderNotice.tsx   # "this build does not analyse video yet"
 │   ├── Notice.tsx              # boxed message, caller chooses the ARIA role
+│   ├── RefreshButton.tsx       # shared, so its aria-disabled handling cannot drift
 │   └── Spinner.tsx
 ├── hooks/usePolledResource.ts  # the polling loop
 ├── lib/
@@ -46,6 +47,7 @@ apps/web/
 │   ├── format.ts               # timestamps and durations
 │   └── status.ts               # the words used for each job status
 ├── scripts/check-contract.mjs  # fails if lib/types.ts drifts from the API
+├── vitest.shared.mts           # the settings both suites must agree on
 └── tests/                      # Vitest; tests/live/ is opt-in
 ```
 
@@ -88,7 +90,7 @@ docker compose --profile app up -d --build
 | `npm run test:live` | Opt-in suite against a running API and worker |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run check:contract` | Compare `lib/types.ts` against the live OpenAPI schema |
+| `npm run check:contract` | Compare `lib/types.ts` against the live OpenAPI schema (`API=` overrides the URL) |
 
 ## Pages
 
@@ -152,7 +154,13 @@ nothing else.
   fixed interval, so requests cannot overlap.
 - A failed refresh keeps the last good value on screen and raises a separate
   `staleError`. A dropped packet must not replace a rendered job with an error
-  page, and a transport failure is not a job failure.
+  page, and a transport failure is not a job failure. "Have we ever had a
+  value" is tracked in a ref rather than a loop-local, because `refresh()`
+  restarts the effect and a loop-local would reset — which is exactly the bug
+  the checkpoint-3 review found.
+- `isRefreshing` is true only for a fetch the person asked for. A background
+  poll deliberately touches no UI-visible flag, so the refresh button does not
+  flicker disabled every couple of seconds.
 - Repeated failures back off, up to 30 seconds.
 - A 404 stops the loop, because it will not fix itself.
 - Polling stops on a terminal status, and the page says so.
@@ -185,8 +193,8 @@ The decisions worth knowing, because they are easy to undo by accident:
   and the browser navigates away to open the file, losing the page.
 - Validation errors are tied to the input with `aria-describedby` and
   `aria-invalid`, and submitting an invalid form moves focus to the input.
-- Each page has one always-mounted `role="status"` region, rendered empty on
-  first paint: assistive technology registers a live region when it is inserted
+- All three views keep one always-mounted `role="status"` region, rendered
+  empty on first paint and present in the loading and error branches too: assistive technology registers a live region when it is inserted
   and announces later changes, so a region that arrives together with its first
   message is frequently missed. Its text is derived from the status alone, with
   nothing that ticks, so polling an unchanged status re-announces nothing.
@@ -220,6 +228,29 @@ like a browser's, and `02-status.live.test.tsx` runs in jsdom, where ordinary
 GET requests work, and renders the components against the video the first file
 uploaded.
 
+## Troubleshooting
+
+**Every page says "Could not reach the API".** The API is not running, or
+`NEXT_PUBLIC_API_BASE_URL` points somewhere else, or the API's CORS list does
+not include this origin. Check `curl http://localhost:8000/health` first. Note
+that `NEXT_PUBLIC_` values are inlined at build time, so changing one needs a
+restart of `npm run dev` — and a rebuild of the Docker image.
+
+**An upload returns 415 for a file that really is a video.** The API checks the
+first bytes for an ISO base-media `ftyp` box. Some older QuickTime `.mov` files
+begin with `moov` instead and are refused.
+
+**The job never leaves "Queued".** No worker is running. Start `uv run pbworker`
+from the repository root.
+
+**Changes to `lib/types.ts` pass locally but break against the API.** Run
+`npm run check:contract` with the API up; it compares the declared fields and
+enum values against the live OpenAPI schema.
+
+**`npm run typecheck` complains about `PageProps` or `LayoutProps`.** Those are
+generated into `.next/types` by `next dev`, `next build` or `next typegen`. Run
+one of them once on a clean checkout.
+
 ## Known Limitations
 
 - **No upload progress bar.** `fetch` cannot report upload progress; only
@@ -230,8 +261,9 @@ uploaded.
   format check reads the first bytes, but the ASGI server has already buffered
   the body by then, so a 1.5 GB file that is not really a video still takes a
   full upload to fail.
-- **No pagination.** The list requests the default page. `VideoList.count` is
-  the length of that page and not a total, so no total is shown.
+- **No pagination.** The list requests the default page of 100 and shows no
+  total, because `VideoList.count` is the length of that page rather than a
+  count of all rows. Past 100 videos the oldest simply do not appear.
 - **No retry for a failed job**, because the API exposes no endpoint for it.
 - **No delete, no playback, no authentication**, matching the backend.
 - **No browser-driven test.** The live suite drives the real components against

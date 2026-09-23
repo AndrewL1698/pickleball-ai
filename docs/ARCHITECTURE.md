@@ -242,10 +242,10 @@ Because uploaded match videos may contain identifiable people:
 - runs natively on Apple Silicon using the PyTorch `mps` device (Docker on macOS cannot use the GPU)
 
 ### Local Prototype (current)
-- Next.js dev server (not built yet)
-- FastAPI, PostgreSQL, Redis + RQ worker (Phase 1 checkpoint 1; see `BACKEND.md`)
+- Next.js dev server (`apps/web`; see `FRONTEND.md`)
+- FastAPI, PostgreSQL, Redis + RQ worker (see `BACKEND.md`)
 - local video directory behind a storage interface
-- local ML process
+- local ML process, still the Phase 0 CLI rather than a worker stage
 
 ### Portfolio Deployment
 - frontend hosting

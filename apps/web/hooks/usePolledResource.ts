@@ -24,7 +24,7 @@
  * memoize them; an inline arrow would restart the loop on every render.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 
 export interface PolledResource<T> {
@@ -32,8 +32,14 @@ export interface PolledResource<T> {
   data: T | null;
   /** True only while the very first fetch is in flight. */
   isLoading: boolean;
-  /** True while any fetch is in flight, including a manual refresh. */
-  isFetching: boolean;
+  /**
+   * True while a fetch the person asked for is in flight.
+   *
+   * Deliberately not "any request in flight": a background poll must not
+   * disable the refresh button or start a spinner every few seconds, which is
+   * movement nobody asked for and which a screen reader may announce.
+   */
+  isRefreshing: boolean;
   /** Set when there is nothing to show at all. */
   error: ApiError | null;
   /** Set when a refresh failed but `data` is still on screen. */
@@ -49,9 +55,16 @@ export interface PollOptions<T> {
   intervalMs?: number;
   /** Longest gap after repeated failures. */
   maxIntervalMs?: number;
-  /** Return false once the value can no longer change. Must be memoized. */
-  shouldContinue: (data: T) => boolean;
+  /**
+   * Return true while the value could still change, so the hook should ask
+   * again. Omitted means "fetch once", which is the base case; polling is what
+   * you get by supplying a predicate. Must be memoized when supplied.
+   */
+  shouldContinue?: (data: T) => boolean;
 }
+
+/** The default predicate: one fetch, then stop. */
+const FETCH_ONCE = () => false;
 
 function asApiError(cause: unknown): ApiError {
   return cause instanceof ApiError
@@ -61,26 +74,31 @@ function asApiError(cause: unknown): ApiError {
 
 export function usePolledResource<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
-  { intervalMs = 2000, maxIntervalMs = 30000, shouldContinue }: PollOptions<T>,
+  { intervalMs = 2000, maxIntervalMs = 30000, shouldContinue = FETCH_ONCE }: PollOptions<T>,
 ): PolledResource<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [staleError, setStaleError] = useState<ApiError | null>(null);
-  // Starts true because the effect fetches immediately on mount; setting it
-  // from inside the effect would be a synchronous render cascade.
-  const [isFetching, setIsFetching] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isPolling, setIsPolling] = useState(true);
   const [refreshCount, setRefreshCount] = useState(0);
+
+  /**
+   * Whether a value has ever arrived, across effect runs.
+   *
+   * A loop-local would be reset every time the effect restarts -- which is
+   * what `refresh()` does -- so the first failed refresh would look like "we
+   * have nothing" and replace the rendered page with an error.
+   */
+  const everLoaded = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let controller: AbortController | null = null;
     let failures = 0;
-    let latest: T | null = null;
 
-    async function tick(isFirst: boolean): Promise<void> {
-      if (!isFirst) setIsFetching(true);
+    async function tick(): Promise<void> {
       const own = new AbortController();
       controller = own;
 
@@ -89,14 +107,14 @@ export function usePolledResource<T>(
         if (cancelled) return;
 
         failures = 0;
-        latest = value;
+        everLoaded.current = true;
         setData(value);
         setError(null);
         setStaleError(null);
 
         if (shouldContinue(value)) {
           setIsPolling(true);
-          timer = setTimeout(() => void tick(false), intervalMs);
+          timer = setTimeout(() => void tick(), intervalMs);
         } else {
           setIsPolling(false);
         }
@@ -118,18 +136,18 @@ export function usePolledResource<T>(
 
         // Keep whatever is on screen and say so, rather than blanking the page.
         setStaleError(failure);
-        if (latest === null) setError(failure);
+        if (!everLoaded.current) setError(failure);
         setIsPolling(true);
         timer = setTimeout(
-          () => void tick(false),
+          () => void tick(),
           Math.min(intervalMs * 2 ** (failures - 1), maxIntervalMs),
         );
       } finally {
-        if (!cancelled) setIsFetching(false);
+        if (!cancelled) setIsRefreshing(false);
       }
     }
 
-    void tick(true);
+    void tick();
 
     return () => {
       cancelled = true;
@@ -138,12 +156,17 @@ export function usePolledResource<T>(
     };
   }, [fetcher, shouldContinue, intervalMs, maxIntervalMs, refreshCount]);
 
-  const refresh = useCallback(() => setRefreshCount((count) => count + 1), []);
+  // Setting the flag here rather than inside the effect means the button
+  // responds to the click itself, not one render later.
+  const refresh = useCallback(() => {
+    setIsRefreshing(true);
+    setRefreshCount((count) => count + 1);
+  }, []);
 
   return {
     data,
     isLoading: data === null && error === null,
-    isFetching,
+    isRefreshing,
     error,
     staleError,
     isPolling,

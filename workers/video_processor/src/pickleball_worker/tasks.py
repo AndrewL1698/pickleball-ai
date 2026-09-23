@@ -135,7 +135,8 @@ def _finish(
             transition(job, status, stage=stage, error_code=error_code)
         except InvalidJobTransition:
             # Already terminal. A retry must not overwrite the first verdict.
+            # `transition` refuses before it mutates anything, so there is
+            # nothing to undo and the surrounding commit is a no-op.
             logger.warning(
                 "job %s is %s; refusing to record %s", job_id, job.status, status
             )
-            session.rollback()

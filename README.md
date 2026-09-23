@@ -58,7 +58,17 @@ See `docs/ROADMAP.md` for what remains.
 
 ## Development Setup
 
-Requirements: [uv](https://docs.astral.sh/uv/) (it installs Python 3.13 automatically). ML code runs natively; on Apple Silicon it uses the PyTorch `mps` device.
+Prerequisites:
+
+- [uv](https://docs.astral.sh/uv/) — installs Python 3.13 automatically
+- [Node.js](https://nodejs.org/) 20.9 or newer (24 is what the web image uses), for the frontend
+- Docker Desktop, for PostgreSQL and Redis
+
+ML code runs natively; on Apple Silicon it uses the PyTorch `mps` device.
+
+Run every backend command from the repository root: the upload directory and
+`.env` are resolved relative to the working directory, so running from
+elsewhere quietly uses a different store.
 
 ```bash
 uv sync                 # create .venv and install the workspace
@@ -111,8 +121,8 @@ Upload a video and watch the job run:
 curl -s http://127.0.0.1:8000/health
 curl -s http://127.0.0.1:8000/ready
 
-# Upload. Returns the video, its id, and the job created for it.
-curl -s -X POST http://127.0.0.1:8000/api/videos -F "file=@data/raw/testclip.mp4"
+# Upload any mp4/mov/m4v. Returns the video, its id, and the job created for it.
+curl -s -X POST http://127.0.0.1:8000/api/videos -F "file=@/path/to/your/match.mp4"
 
 curl -s http://127.0.0.1:8000/api/videos
 curl -s http://127.0.0.1:8000/api/videos/<video_id>
@@ -153,11 +163,16 @@ npm run build
 npm run check:contract          # needs the API up; catches type drift
 ```
 
-Everything in containers instead, including the web app:
+Everything in containers instead, including the web app. The profile brings up
+five services — PostgreSQL, Redis, a one-shot `migrate` job, the API, the worker
+and the web app — and applies the migrations itself:
 
 ```bash
 docker compose --profile app up -d --build
 ```
+
+The two paths keep uploads in different places: a host process writes
+`data/uploads`, the containers share a Docker volume.
 
 Full details, environment variables, the polling design and the current
 limitations are in `docs/FRONTEND.md`.

@@ -43,11 +43,11 @@ describe("validateVideoFile", () => {
 describe("formatBytes", () => {
   it.each([
     [512, "512 B"],
-    [1024, "1.0 KB"],
-    [1536, "1.5 KB"],
-    [1024 * 1024 * 3.5, "3.5 MB"],
-    [2 * 1024 * 1024 * 1024, "2.0 GB"],
-    [1024 * 1024 * 20, "20 MB"],
+    [1024, "1.0 KiB"],
+    [1536, "1.5 KiB"],
+    [1024 * 1024 * 3.5, "3.5 MiB"],
+    [2 * 1024 * 1024 * 1024, "2.0 GiB"],
+    [1024 * 1024 * 20, "20 MiB"],
   ])("renders %i as %s", (bytes, expected) => {
     expect(formatBytes(bytes)).toBe(expected);
   });

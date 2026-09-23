@@ -25,8 +25,8 @@ def ready(session: SessionDep, queue: QueueDep, response: Response) -> ReadyResp
     """Whether the database and the queue are both reachable.
 
     Returns 503 when either is not, so a deployment can wait for them, but the
-    body says only which one failed: the exception text contains the URL the
-    connection was attempted on, password included.
+    body says only which one failed: the exception text names the host the
+    connection was attempted against, which is nobody else's business.
     """
     database_ok = True
     try:

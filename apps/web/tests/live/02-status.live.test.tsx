@@ -14,11 +14,9 @@ import { VideoStatusView } from "@/components/VideoStatusView";
 import { API_BASE_URL, listVideos } from "@/lib/api";
 import type { VideoSummary } from "@/lib/types";
 
-vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  ),
-}));
+// Async factory: `vi.mock` is hoisted above the imports, so the stub has to
+// be pulled in when the factory runs rather than at module scope.
+vi.mock("next/link", async () => (await import("../fixtures")).nextLinkMock());
 
 let newest: VideoSummary;
 

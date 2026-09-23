@@ -13,14 +13,13 @@ rather than as an error to report.
 
 import logging
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from pickleball_api.errors import JOB_ERROR_MESSAGES, JobErrorCode
-from pickleball_api.models import AnalysisJob, JobStage, JobStatus, Video
+from pickleball_api.models import AnalysisJob, JobStage, JobStatus, Video, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +31,6 @@ ALLOWED_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
     # A failed job can be queued again; nothing else may follow a failure.
     JobStatus.FAILED: frozenset({JobStatus.QUEUED}),
 }
-
-TERMINAL_STATUSES = frozenset({JobStatus.READY, JobStatus.FAILED})
-
 
 class InvalidJobTransition(Exception):
     """A job was asked to move to a status it cannot reach from its current one."""
@@ -48,12 +44,6 @@ class InvalidJobTransition(Exception):
 
 def can_transition(current: JobStatus, requested: JobStatus) -> bool:
     return requested in ALLOWED_TRANSITIONS[current]
-
-
-def now() -> datetime:
-    """Timezone-aware present. Naive timestamps become ambiguous the moment two
-    machines are involved, so every stored time carries its offset."""
-    return datetime.now(UTC)
 
 
 def transition(
@@ -78,17 +68,17 @@ def transition(
         job.progress = _clamp(progress)
 
     if status is JobStatus.RUNNING:
-        job.started_at = now()
+        job.started_at = utcnow()
         job.finished_at = None
         job.error_code = None
         job.error_message = None
     elif status is JobStatus.READY:
-        job.finished_at = now()
+        job.finished_at = utcnow()
         job.progress = 1.0
         job.error_code = None
         job.error_message = None
     elif status is JobStatus.FAILED:
-        job.finished_at = now()
+        job.finished_at = utcnow()
         code = error_code or JobErrorCode.INTERNAL
         job.error_code = code.value
         job.error_message = JOB_ERROR_MESSAGES[code]

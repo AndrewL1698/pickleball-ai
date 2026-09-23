@@ -29,13 +29,6 @@ export const JOB_STAGES = [
 ] as const;
 export type JobStage = (typeof JOB_STAGES)[number];
 
-/** Statuses the server will never move away from, so polling can stop. */
-export const TERMINAL_STATUSES: readonly JobStatus[] = ["ready", "failed"];
-
-export function isTerminal(status: JobStatus): boolean {
-  return TERMINAL_STATUSES.includes(status);
-}
-
 /** An analysis job. Timestamps are ISO 8601 with a `Z` offset. */
 export interface Job {
   id: string;

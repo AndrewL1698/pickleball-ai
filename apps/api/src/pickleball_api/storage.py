@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO, Protocol, runtime_checkable
+from typing import BinaryIO, Protocol
 
 #: A key is one flat path component: hex, a dot, a lowercase extension.
 STORAGE_KEY_PATTERN = re.compile(r"\A[0-9a-f]{32}\.[a-z0-9]{1,8}\Z")
@@ -57,18 +57,6 @@ def new_storage_key(extension: str) -> str:
     return key
 
 
-@runtime_checkable
-class BoundedStorage(Protocol):
-    """A store that can say how much room is left.
-
-    Separate from `Storage` because an object store has no such notion: S3 does
-    not run out, a laptop does.
-    """
-
-    def free_bytes(self) -> int: ...
-
-
-@runtime_checkable
 class Storage(Protocol):
     """An object store keyed by opaque strings."""
 
@@ -90,6 +78,13 @@ class Storage(Protocol):
 
     def size(self, key: str) -> int:
         """Bytes currently stored under `key`. Raises `ObjectNotFound`."""
+
+    def free_bytes(self) -> int | None:
+        """Space left for new objects, or None when the question is meaningless.
+
+        A laptop runs out of disk; S3 does not. Returning None is how a store
+        says "do not ask", which keeps the caller free of a capability check.
+        """
 
 
 class LocalFileStorage:
@@ -163,7 +158,7 @@ class LocalFileStorage:
         except FileNotFoundError as exc:
             raise ObjectNotFound(key) from exc
 
-    def free_bytes(self) -> int:
+    def free_bytes(self) -> int | None:
         """Space left on the filesystem holding the store."""
         return shutil.disk_usage(self.root).free
 

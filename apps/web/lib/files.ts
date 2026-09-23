@@ -24,8 +24,10 @@ function readMaxBytes(): number {
 }
 
 export function formatBytes(bytes: number): string {
+  // KiB/MiB/GiB rather than KB/MB/GB: the divisor is 1024 and the limit this
+  // renders is 2 GiB, so calling it "2.0 GB" would misdescribe both.
   if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
+  const units = ["KiB", "MiB", "GiB", "TiB"];
   let value = bytes / 1024;
   let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {

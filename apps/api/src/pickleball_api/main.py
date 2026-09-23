@@ -16,6 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from pickleball_api.config import Settings, get_settings
+from pickleball_api.limits import limit_upload_size
 from pickleball_api.queue import RedisJobQueue
 from pickleball_api.routers import health, jobs, videos
 from pickleball_api.schemas import ErrorResponse
@@ -40,7 +41,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # resolved per request would follow a symlink swapped in later.
         app.state.storage = LocalFileStorage(settings.upload_dir)
         app.state.queue = RedisJobQueue.from_settings(settings)
-        logger.info("api started in %s", settings.environment)
+        # The resolved path, not the configured one: `upload_dir` defaults to a
+        # relative path, so starting the API from the wrong directory silently
+        # uses a different store and every job then fails to find its file.
+        logger.info(
+            "api started in %s, uploads in %s",
+            settings.environment,
+            app.state.storage.root,
+        )
         yield
 
     app = FastAPI(
@@ -50,9 +58,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         debug=False,
     )
 
+    app.state.settings = settings
+    # Before anything reads the body, so an oversized upload is refused rather
+    # than spooled to disk and then rejected.
+    app.middleware("http")(limit_upload_size(settings.max_upload_bytes))
     # Without this, any page the user visits can reach a loopback API that has
     # no authentication, via a hostname that resolves to 127.0.0.1.
-    app.state.settings = settings
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
     app.add_middleware(
         CORSMiddleware,
@@ -88,7 +99,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 _STATUS_CODES = {
+    # 400 and 405 are raised by Starlette rather than by this application, so
+    # they would otherwise fall through to an unhelpful "http_400".
+    400: "bad_request",
     404: "not_found",
+    405: "method_not_allowed",
     413: "upload_too_large",
     415: "unsupported_file_type",
     503: "dependency_unavailable",

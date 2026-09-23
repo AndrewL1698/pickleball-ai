@@ -14,6 +14,15 @@
 
 name: pickleball
 
+# The three Python services must agree on where the database, the queue and the
+# uploads are, so they share one definition rather than three copies that can
+# drift. Inside this network Postgres is on its own port 5432; only the host
+# publishes it on 5433.
+x-backend-env: &backend-env
+  PICKLEBALL_DATABASE_URL: postgresql+psycopg://pickleball:pickleball@postgres:5432/pickleball
+  PICKLEBALL_REDIS_URL: redis://redis:6379/0
+  PICKLEBALL_UPLOAD_DIR: /data/uploads
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -45,16 +54,31 @@ services:
       timeout: 3s
       retries: 10
 
-  api:
+  # Schema changes are migrations, never an application side effect, so the
+  # containerised stack needs something to run them. This is a one-shot job:
+  # it applies the migrations and exits, and the api and worker wait for it to
+  # exit successfully before they start.
+  migrate:
     profiles: ["app"]
+    # The one place the Python image is built; api and worker reuse the tag,
+    # so `up --build` does not build three copies of identical layers.
+    image: pickleball-api:dev
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    command: ["uv", "run", "pbapi", "--host", "0.0.0.0"]
+    command: ["alembic", "-c", "apps/api/alembic.ini", "upgrade", "head"]
+    environment: *backend-env
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    profiles: ["app"]
+    image: pickleball-api:dev
+    command: ["pbapi", "--host", "0.0.0.0"]
     environment:
-      PICKLEBALL_DATABASE_URL: postgresql+psycopg://pickleball:pickleball@postgres:5432/pickleball
-      PICKLEBALL_REDIS_URL: redis://redis:6379/0
-      PICKLEBALL_UPLOAD_DIR: /data/uploads
+      <<: *backend-env
       # Inside the container the app is reached as `api`, so that host must pass
       # the trusted-host check as well.
       PICKLEBALL_TRUSTED_HOSTS: '["localhost","127.0.0.1","api"]'
@@ -62,9 +86,17 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - uploads:/data/uploads
+    healthcheck:
+      # The image has no curl; Python is what it does have.
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 
@@ -81,23 +113,22 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
   worker:
     profiles: ["app"]
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    command: ["uv", "run", "pbworker"]
-    environment:
-      PICKLEBALL_DATABASE_URL: postgresql+psycopg://pickleball:pickleball@postgres:5432/pickleball
-      PICKLEBALL_REDIS_URL: redis://redis:6379/0
-      PICKLEBALL_UPLOAD_DIR: /data/uploads
+    image: pickleball-api:dev
+    # --fork: the container is Linux, where RQ's forking worker is the right
+    # one. The macOS default of SimpleWorker exists only because forking breaks
+    # there once a CoreFoundation-backed library is loaded.
+    command: ["pbworker", "--fork"]
+    environment: *backend-env
     volumes:
       - uploads:/data/uploads
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 

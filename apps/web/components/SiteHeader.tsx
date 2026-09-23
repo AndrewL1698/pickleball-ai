@@ -14,7 +14,7 @@ export function SiteHeader() {
   return (
     <header className="border-b border-border-subtle">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-2 px-4 py-4">
-        <Link href="/" className="focus-ring rounded-sm font-semibold tracking-tight">
+        <Link href="/" className="focus-ring flex min-h-11 items-center rounded-sm font-semibold tracking-tight">
           Pickleball AI
         </Link>
         <nav aria-label="Main">

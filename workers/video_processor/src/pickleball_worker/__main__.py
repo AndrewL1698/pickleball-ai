@@ -12,6 +12,7 @@ from redis import Redis
 from rq import Queue, SimpleWorker, Worker
 
 from pickleball_api.config import get_settings
+from pickleball_api.storage import LocalFileStorage
 
 logger = logging.getLogger("pickleball_worker")
 
@@ -32,6 +33,10 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     settings = get_settings()
+    # Same reason as the API: a worker started from another directory would
+    # look for uploads somewhere else and fail every job with a file it cannot
+    # find, so the resolved path goes in the log where it can be compared.
+    logger.info("reading uploads from %s", LocalFileStorage(settings.upload_dir).root)
     redis = Redis.from_url(settings.redis_url.get_secret_value())
     queue = Queue(settings.queue_name, connection=redis)
     # RQ forks a child per job by default. On macOS that deadlocks or aborts

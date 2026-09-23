@@ -5,18 +5,16 @@
  * region -- is the real component.
  */
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { UploadForm } from "@/components/UploadForm";
 import { MAX_UPLOAD_BYTES } from "@/lib/files";
 import { VIDEO_DETAIL, jsonResponse, videoFile } from "./fixtures";
 
-vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  ),
-}));
+// Async factory: `vi.mock` is hoisted above the imports, so the stub has to
+// be pulled in when the factory runs rather than at module scope.
+vi.mock("next/link", async () => (await import("./fixtures")).nextLinkMock());
 
 function fileInput() {
   return screen.getByLabelText(/choose a video file/i) as HTMLInputElement;
@@ -187,5 +185,59 @@ describe("submitting", () => {
     await user.click(screen.getByRole("button", { name: /upload video/i }));
 
     expect(await screen.findByText(/Could not reach the API/i)).toBeInTheDocument();
+  });
+});
+
+describe("drag and drop", () => {
+  /** A drop event carrying files, which jsdom does not build on its own. */
+  function dropEvent(files: File[]): Partial<DataTransfer> {
+    return { files: files as unknown as FileList, dropEffect: "none", types: ["Files"] };
+  }
+
+  it("accepts a dropped video the same way as a chosen one", () => {
+    render(<UploadForm />);
+    const zone = screen.getByText(/choose a video file/i).closest("label")!;
+
+    fireEvent.drop(zone, { dataTransfer: dropEvent([videoFile("dropped.mp4")]) });
+
+    expect(screen.getByText(/Selected: dropped.mp4/)).toBeInTheDocument();
+  });
+
+  it("validates a dropped file, which bypasses the accept filter entirely", () => {
+    render(<UploadForm />);
+    const zone = screen.getByText(/choose a video file/i).closest("label")!;
+
+    fireEvent.drop(zone, { dataTransfer: dropEvent([videoFile("notes.txt")]) });
+
+    expect(screen.getByText(/not a supported video/i)).toBeInTheDocument();
+  });
+
+  it("cancels the browser's default drag handling", () => {
+    // Without preventDefault on dragover the drop never fires and the browser
+    // navigates away to open the file, losing the page.
+    render(<UploadForm />);
+    const zone = screen.getByText(/choose a video file/i).closest("label")!;
+
+    const dragOver = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperty(dragOver, "dataTransfer", { value: { dropEffect: "none" } });
+    fireEvent(zone, dragOver);
+
+    expect(dragOver.defaultPrevented).toBe(true);
+  });
+
+  it("keeps the drag highlight until the pointer really leaves", () => {
+    // Drag events fire for child elements too, so a plain boolean would
+    // flicker as the pointer crosses the label's own contents.
+    render(<UploadForm />);
+    const zone = screen.getByText(/choose a video file/i).closest("label")!;
+    const child = screen.getByText(/choose a video file/i);
+
+    fireEvent.dragEnter(zone, { dataTransfer: dropEvent([]) });
+    fireEvent.dragEnter(child, { dataTransfer: dropEvent([]) });
+    fireEvent.dragLeave(child);
+    expect(zone.className).toContain("border-accent");
+
+    fireEvent.dragLeave(zone);
+    expect(zone.className).not.toContain("border-accent");
   });
 });

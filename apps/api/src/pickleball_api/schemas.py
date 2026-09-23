@@ -78,8 +78,8 @@ class ReadyResponse(BaseModel):
     """Readiness: the dependencies this process needs are reachable.
 
     Deliberately booleans and nothing else. The reason a check failed is logged
-    on the server, because a connection error's text contains the database or
-    Redis URL, password included.
+    on the server: a connection error's text names the host it failed to reach,
+    and nothing about the infrastructure belongs in a public response.
     """
 
     ready: bool

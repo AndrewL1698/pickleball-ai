@@ -53,7 +53,12 @@ def clean_filename(filename: str | None) -> str:
     name = name.strip().lstrip(".")
     if not name:
         raise UploadRejected("missing_filename", "The upload has no usable filename.")
-    return name[:MAX_FILENAME_CHARS]
+    if len(name) <= MAX_FILENAME_CHARS:
+        return name
+    # Truncate the stem, not the whole name: cutting the extension off would
+    # turn a legitimate long filename into an unsupported file type.
+    suffix = PurePosixPath(name).suffix[: MAX_FILENAME_CHARS // 2]
+    return name[: MAX_FILENAME_CHARS - len(suffix)] + suffix
 
 
 def video_extension(filename: str, allowed: tuple[str, ...]) -> str:

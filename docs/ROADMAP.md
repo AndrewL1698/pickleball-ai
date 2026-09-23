@@ -119,9 +119,8 @@ PostgreSQL, stores the file behind a storage interface, and enqueues the job on
 Redis; an RQ worker claims it and drives it to `ready` or `failed`. Migrations
 are Alembic-only. Details and the environment reference are in `docs/BACKEND.md`.
 
-The processing is a **placeholder** that fingerprints the file rather than
-analyzing it, so the exit criterion is not met yet: there is no web app, and no
-`Match` entity.
+At that point the processing was a placeholder and there was no web app, so the
+exit criterion was not yet met.
 
 Status (2026-09-23): checkpoint 2 of 3 done - the upload and status interface.
 A Next.js App Router app (`apps/web`) with three pages: upload a video by
@@ -134,11 +133,39 @@ Vitest suite plus an opt-in suite against the running stack. Details in
 The collection is called "Videos", not "Matches": `Match` does not exist yet.
 The UI states plainly that no analysis is performed.
 
-Remaining:
+Status (2026-09-23): checkpoint 3 of 3 done - integration and hardening.
+**Phase 1 passes its exit criterion**: a video can be uploaded and watched
+through a background processing job, in the browser, from a documented clean
+checkout.
 
-- checkpoint 3: `Match` entity, real metadata extraction in the worker
-  (`pickleball_ml.video.reader.read_metadata`), serving uploaded video back for
-  playback, and a browser-driven test of the upload interaction
+Verified end to end, against both the native and the containerised stack:
+PostgreSQL and Redis start, Alembic migrations create the schema (never an
+application side effect), the API and worker start, the frontend starts, an
+upload returns persistent video and job identifiers, the job is observed moving
+`queued -> running -> ready` with real progress, the record survives a refresh,
+and a deliberately broken job reaches `failed` with a safe error code. Re-running
+a finished job leaves its verdict untouched.
+
+What the exit criterion does **not** claim: the processing is a placeholder that
+fingerprints the uploaded file. No video is analysed, no frame is decoded, and
+no `Match` entity exists. Those are Phase 2 and Phase 3 work, and the interface
+they will replace (`pickleball_worker.processors.VideoProcessor`) is deliberately
+the only thing that has to change.
+
+Carried into later phases:
+
+- Real video metadata extraction in the worker
+  (`pickleball_ml.video.reader.read_metadata`), replacing the placeholder.
+- A `Match` entity, so calibrations, players and rallies have an owner. Until
+  then the UI deliberately says "Videos", never "Matches".
+- Serving uploaded video back to the browser for playback, which needs its own
+  decisions about origin and content headers.
+- No reaper for a job whose worker was killed, and no retry endpoint, so the
+  `failed -> queued` transition is unreachable over HTTP.
+- No authentication, so every upload is visible to anyone who can reach the
+  port; the API binds to loopback for that reason.
+- No browser-driven test. The opt-in suite drives the real components against
+  the running stack in jsdom, which covers the data flow but not a real click.
 
 ---
 

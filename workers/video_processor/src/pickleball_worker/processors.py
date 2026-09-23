@@ -20,9 +20,7 @@ from uuid import UUID
 
 from pickleball_api.errors import JobErrorCode, JobFailure
 from pickleball_api.models import JobStage
-from pickleball_api.storage import ObjectNotFound, Storage
-
-READ_CHUNK_BYTES = 1024 * 1024
+from pickleball_api.storage import CHUNK_BYTES, ObjectNotFound, Storage
 
 #: Called with the stage reached and how far through the job is, 0.0 to 1.0.
 ProgressReporter = Callable[[JobStage, float], None]
@@ -77,7 +75,7 @@ class PlaceholderProcessor:
         read = 0
         try:
             with storage.open(video.storage_key) as stream:
-                while chunk := stream.read(READ_CHUNK_BYTES):
+                while chunk := stream.read(CHUNK_BYTES):
                     digest.update(chunk)
                     read += len(chunk)
                     if video.byte_size:

@@ -20,17 +20,21 @@ export function Notice({
   tone = "info",
   title,
   role,
+  code,
   children,
 }: {
   tone?: Tone;
   title?: string;
   role?: "alert" | "status";
+  /** A machine-readable reason, shown small and last. */
+  code?: string | null;
   children: ReactNode;
 }) {
   return (
     <div role={role} className={`rounded-lg border px-4 py-3 text-sm ${TONES[tone]}`}>
       {title ? <p className="font-semibold">{title}</p> : null}
       <div className={title ? "mt-1" : undefined}>{children}</div>
+      {code ? <p className="mt-1 text-xs opacity-80">Error code: {code}</p> : null}
     </div>
   );
 }

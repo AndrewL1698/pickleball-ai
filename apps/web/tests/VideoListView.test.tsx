@@ -6,11 +6,9 @@ import { expect, it, vi } from "vitest";
 import { VideoListView } from "@/components/VideoListView";
 import { JOB_READY, VIDEO_SUMMARY, jsonResponse } from "./fixtures";
 
-vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  ),
-}));
+// Async factory: `vi.mock` is hoisted above the imports, so the stub has to
+// be pulled in when the factory runs rather than at module scope.
+vi.mock("next/link", async () => (await import("./fixtures")).nextLinkMock());
 
 it("shows a named loading state while the first request is in flight", async () => {
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
@@ -57,6 +55,28 @@ it("renders each video's own latest status", async () => {
   const badges = screen.getAllByTestId("status-badge");
   expect(badges[0]).toHaveTextContent(/queued/i);
   expect(badges[1]).toHaveTextContent(/ready/i);
+});
+
+it("shows a video that has no job without pretending it has one", async () => {
+  const orphan = { ...VIDEO_SUMMARY, latest_job: null };
+  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ videos: [orphan], count: 1 })));
+  render(<VideoListView />);
+
+  expect(await screen.findByText("demo.mp4")).toBeInTheDocument();
+  expect(screen.getByText("No job")).toBeInTheDocument();
+  expect(screen.queryByTestId("status-badge")).not.toBeInTheDocument();
+});
+
+it("announces the outcome once the list has settled", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => jsonResponse({ videos: [VIDEO_SUMMARY], count: 1 })),
+  );
+  const { container } = render(<VideoListView />);
+  await screen.findByText("demo.mp4");
+  expect(container.querySelector('p[role="status"].sr-only')).toHaveTextContent(
+    "1 video loaded.",
+  );
 });
 
 it("announces a load failure and offers a retry that actually refetches", async () => {
