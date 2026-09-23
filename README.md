@@ -35,6 +35,11 @@ Phase 0a (CV prototype) is implemented as a command-line pipeline for one test v
 video -> manual court calibration -> player tracks -> homography -> animated top-down court
 ```
 
+Phase 0b extends that to several recordings at once: an experiment manifest of
+sampled windows, camera comparison across four fixed-camera matches, measured
+player-tracking metrics, and a first ball-tracking baseline. Results and the
+exit-criterion assessment are in `docs/PHASE_0B_RESULTS.md`.
+
 There is no web app, API, or database yet. See `docs/ROADMAP.md`.
 
 ## Development Setup
@@ -49,6 +54,14 @@ uv run mypy             # type check
 ```
 
 Pretrained detector weights are downloaded into `weights/` (gitignored) on first use.
+
+Ball tracking uses the released WASB tennis model, which is not downloaded
+automatically. Fetch it once into `weights/wasb/` (6 MB, MIT-licensed code and
+published weights from [WASB-SBDT](https://github.com/nttcom/WASB-SBDT)):
+
+```bash
+uvx gdown 14AeyIOCQ2UaQmbZLNQJa1H_eSwxUXk7z -O weights/wasb/wasb_tennis_best.pth.tar
+```
 
 ## Running the Phase 0 Pipeline
 
@@ -87,6 +100,77 @@ uv run pbml evaluate $V --labels data/annotations/testclip/identity_samples.json
 ```
 
 Check `calibration_overlay.png` before running later stages: the red projected lines should sit on the painted court lines. Landmark definitions and the court coordinate system are in `docs/ARCHITECTURE.md`.
+
+If the teams change ends inside the processed window, pass each changeover time
+so identities survive it:
+
+```bash
+uv run pbml identify $V --end-switch 950
+```
+
+## Running a Multi-Window Experiment (Phase 0b)
+
+One video is not enough evidence. An experiment manifest lists the source clips,
+the stretches over which each camera does not move, and the windows to process,
+so several windows of several matches can be run, resumed, and compared without
+overwriting each other. `experiments/phase0b.json` is the Phase 0b manifest.
+
+```bash
+# Everything: metadata, calibration, camera characteristics, tracking, identity, ball
+uv run pbml experiment run experiments/phase0b.json
+
+# One window, or one stage, or a 20-second smoke test into <window>_smoke
+uv run pbml experiment run experiments/phase0b.json --window buzz_a
+uv run pbml experiment run experiments/phase0b.json --stage track --window buzz_a
+uv run pbml experiment run experiments/phase0b.json --smoke 20
+
+# Debug videos (top-down players, and the ball with its trail)
+uv run pbml experiment run experiments/phase0b.json --stage render --stage ball_render
+
+# Collect every window record and metric into one summary
+uv run pbml experiment summary experiments/phase0b.json
+```
+
+Each window writes to `data/processed/<clip>/<window>/`, with the same file names
+as the single-video pipeline plus `window_run.json`: the exact frame range,
+source metadata, calibration used, stage configs, model versions, runtimes and
+status. Stages are skipped when their inputs and configuration are unchanged, so
+an interrupted run resumes; `--force <stage>` (or `--force all`) overrides that.
+
+A camera that is bumped mid-match needs a second calibration: list both stretches
+as separate `segments` in the manifest and point each window at the right one. A
+window that crosses a camera move is rejected rather than silently mis-calibrated.
+
+## Labeling and Evaluation
+
+Metrics need labels. Both tools export sampled frames and a template to fill in,
+and the filled files live in `data/annotations/<clip>/` (tracked, JSON only).
+
+```bash
+# Frames with numbered detection boxes, plus enlarged crops; predicted IDs are hidden
+uv run pbml label-players experiments/phase0b.json --window buzz_a --every-seconds 5
+
+# Ball centres: click tool with a magnifier (a: absent, u: unsure, b: back)
+uv run pbml label-ball experiments/phase0b.json --window buzz_a
+# ... or export the frames and fill the template by hand
+uv run pbml label-ball experiments/phase0b.json --window buzz_a --export
+```
+
+Point a window's `player_labels` / `ball_labels` at the filled files and the
+`evaluate` stage reports coverage, identity accuracy, ID switches, ball
+coverage, and pixel error at several tolerances, split into tuning and held-out
+windows.
+
+Label honestly or the metrics are worthless:
+
+- Name people by what they are wearing, never by the predicted ID. The player
+  export deliberately hides predictions.
+- List every court player visible in a frame. A player you leave out counts as
+  "not visible", which silently inflates coverage.
+- If you cannot tell two players apart in a frame, mark the frame `"skip": true`
+  rather than guessing. Guesses show up as tracker errors that are really yours.
+- For the ball, `absent` is a claim that the ball is not visible, not that you
+  did not find it; use `unsure` when you are not certain.
 
 ## Initial Recording Constraints
 

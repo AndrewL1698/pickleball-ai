@@ -1,0 +1,604 @@
+{
+  "schema": "pbml.player_labels/v1",
+  "clip": "gold",
+  "window": "gold_mid",
+  "video": "data/raw/Gold Medal Match Pickleball Senior Mixed Doubles 3.5 60-65 Gold Medal Match Fall Brawl.mp4",
+  "annotator": "claude (visual review of exported frames and crops)",
+  "created_at": "2026-09-22T20:07:46.847197+00:00",
+  "people": {
+    "A_man": "team A man: navy short-sleeve shirt, white shorts, white hair",
+    "A_woman": "team A woman: lavender top, patterned white shorts, visor",
+    "B_man": "team B man: pink/orange patterned shirt, pink shorts",
+    "B_woman": "team B woman: light-blue tank top, black shorts, black knee sleeves"
+  },
+  "instructions": "For every court player visible in the frame add {'person': <name>, 'candidate': <id>}; if the player is visible but has no candidate box, add {'person': <name>, 'box': null}. Leave players that are not visible out. Name the four people in 'people' by clothing, not by predicted ID.",
+  "frames": [
+    {
+      "frame_number": 72000,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            264.9,
+            453.5,
+            536.6,
+            996.2
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1222.6,
+            464.5,
+            1449.0,
+            1076.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1119.7,
+            484.2,
+            1143.4,
+            552.0
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            842.1,
+            465.5,
+            880.4,
+            551.6
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 3
+        },
+        {
+          "person": "B_woman",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 72450,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            667.1,
+            456.8,
+            820.4,
+            714.9
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            902.1,
+            470.4,
+            1056.4,
+            715.6
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            796.0,
+            466.0,
+            834.0,
+            549.8
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 72900,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            661.8,
+            456.0,
+            754.6,
+            725.6
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            798.5,
+            464.3,
+            831.4,
+            558.8
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            994.7,
+            477.1,
+            1030.9,
+            564.6
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "B_man",
+          "candidate": 1
+        },
+        {
+          "person": "B_woman",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 73350,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            40.9,
+            442.1,
+            333.4,
+            1072.2
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1078.2,
+            468.7,
+            1157.0,
+            723.0
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            505.6,
+            479.9,
+            571.4,
+            633.6
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            810.6,
+            475.0,
+            846.7,
+            597.7
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "box": null
+        },
+        {
+          "person": "B_woman",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 73800,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            983.3,
+            483.7,
+            1100.8,
+            695.1
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            699.9,
+            509.7,
+            878.6,
+            685.2
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            832.7,
+            467.2,
+            874.8,
+            576.3
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1108.3,
+            483.6,
+            1148.3,
+            574.8
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 1
+        },
+        {
+          "person": "A_woman",
+          "candidate": 0
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 74250,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            332.4,
+            470.6,
+            693.7,
+            1076.0
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1176.0,
+            765.1,
+            1387.4,
+            1077.8
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            838.2,
+            466.0,
+            866.9,
+            566.6
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 74700,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            938.3,
+            478.2,
+            983.2,
+            641.6
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1162.1,
+            470.1,
+            1203.1,
+            572.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1137.4,
+            472.6,
+            1170.6,
+            566.2
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "between points, with only the referee and part of one team in frame; identities cannot be told apart from officials"
+    },
+    {
+      "frame_number": 75150,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            938.4,
+            478.2,
+            982.9,
+            641.6
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1158.9,
+            471.1,
+            1198.9,
+            570.2
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1147.1,
+            476.2,
+            1172.6,
+            567.0
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "between points, with only the referee and part of one team in frame; identities cannot be told apart from officials"
+    },
+    {
+      "frame_number": 75600,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            893.4,
+            481.6,
+            952.3,
+            639.1
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1139.6,
+            471.2,
+            1170.9,
+            568.7
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "B_man",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 76050,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            904.5,
+            457.3,
+            1118.8,
+            1074.4
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            0.4,
+            418.8,
+            203.6,
+            1072.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            873.0,
+            476.8,
+            918.8,
+            640.4
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            848.6,
+            467.8,
+            880.3,
+            550.1
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 1
+        },
+        {
+          "person": "A_woman",
+          "candidate": 0
+        },
+        {
+          "person": "B_man",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 76500,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1173.3,
+            494.6,
+            1447.1,
+            1077.1
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            446.4,
+            469.2,
+            638.2,
+            979.6
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            981.1,
+            479.5,
+            1035.5,
+            602.0
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 1
+        },
+        {
+          "person": "A_woman",
+          "candidate": 0
+        },
+        {
+          "person": "B_woman",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 76950,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            0.3,
+            438.1,
+            289.2,
+            1073.8
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1202.7,
+            482.0,
+            1499.6,
+            1075.4
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            786.9,
+            463.2,
+            826.9,
+            593.6
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1017.0,
+            485.5,
+            1056.9,
+            565.7
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 3
+        }
+      ]
+    }
+  ],
+  "notes": "Gold held-out window at 40:00-43:00, team A near. A person is listed only when visible; a null box means visible but not detected. The referee standing at the net post is never a player."
+}

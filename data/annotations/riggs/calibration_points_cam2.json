@@ -1,0 +1,13 @@
+{
+  "near_left_baseline_corner": [82.0, 904.0],
+  "near_center_baseline": [729.0, 886.0],
+  "near_right_baseline_corner": [1468.0, 868.0],
+  "near_left_kitchen": [592.0, 594.0],
+  "near_center_kitchen": [887.0, 579.0],
+  "near_right_kitchen": [1209.0, 560.0],
+  "far_center_kitchen": [934.0, 495.0],
+  "far_right_kitchen": [1145.0, 489.0],
+  "far_left_baseline_corner": [805.0, 465.0],
+  "far_center_baseline": [955.0, 455.0],
+  "far_right_baseline_corner": [1116.0, 446.0]
+}

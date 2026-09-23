@@ -1,0 +1,1016 @@
+{
+  "schema": "pbml.player_labels/v1",
+  "clip": "gold",
+  "window": "gold_early",
+  "video": "data/raw/Gold Medal Match Pickleball Senior Mixed Doubles 3.5 60-65 Gold Medal Match Fall Brawl.mp4",
+  "annotator": "claude (visual review of exported frames and crops)",
+  "created_at": "2026-09-22T19:04:51.456024+00:00",
+  "people": {
+    "A_man": "team A man: navy short-sleeve shirt, white shorts, white hair",
+    "A_woman": "team A woman: lavender top, patterned white shorts, visor",
+    "B_man": "team B man: pink/orange patterned shirt, pink shorts",
+    "B_woman": "team B woman: light-blue tank top, black shorts, black knee sleeves"
+  },
+  "instructions": "For every court player visible in the frame add {'person': <name>, 'candidate': <id>}; if the player is visible but has no candidate box, add {'person': <name>, 'box': null}. Leave players that are not visible out. Name the four people in 'people' by clothing, not by predicted ID.",
+  "frames": [
+    {
+      "frame_number": 3600,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            662.4,
+            464.1,
+            752.1,
+            712.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            848.2,
+            469.5,
+            962.0,
+            708.6
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            792.3,
+            476.6,
+            830.9,
+            594.9
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            927.6,
+            468.4,
+            971.9,
+            605.4
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            928.1,
+            468.8,
+            971.9,
+            562.2
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 3
+        },
+        {
+          "person": "B_woman",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 3900,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            781.5,
+            460.7,
+            863.1,
+            689.5
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1095.4,
+            489.6,
+            1226.9,
+            916.6
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            973.6,
+            478.0,
+            1009.2,
+            570.8
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 4200,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            801.1,
+            463.3,
+            899.8,
+            707.4
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            698.2,
+            478.1,
+            778.6,
+            594.6
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            972.5,
+            475.3,
+            1045.7,
+            699.9
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 4500,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1029.8,
+            476.9,
+            1107.5,
+            696.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1008.7,
+            472.3,
+            1039.0,
+            553.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            822.5,
+            474.9,
+            850.2,
+            550.0
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_woman",
+          "candidate": 0
+        },
+        {
+          "person": "B_man",
+          "candidate": 1
+        },
+        {
+          "person": "B_woman",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 4800,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            993.7,
+            503.5,
+            1161.3,
+            735.1
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            735.3,
+            483.0,
+            866.5,
+            729.4
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            919.1,
+            473.6,
+            976.5,
+            599.0
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            832.9,
+            480.4,
+            860.2,
+            586.7
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 1
+        },
+        {
+          "person": "A_woman",
+          "candidate": 0
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 5100,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1484.6,
+            468.3,
+            1812.5,
+            1075.2
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            639.4,
+            451.9,
+            738.8,
+            737.1
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            791.7,
+            467.3,
+            824.4,
+            559.3
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1009.5,
+            478.8,
+            1039.4,
+            553.3
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 1
+        },
+        {
+          "person": "A_woman",
+          "candidate": 0
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 5400,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1092.3,
+            539.9,
+            1384.4,
+            1075.7
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            364.1,
+            448.7,
+            553.4,
+            937.0
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            998.9,
+            479.9,
+            1033.7,
+            589.1
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            824.9,
+            468.3,
+            875.2,
+            580.0
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 1
+        },
+        {
+          "person": "A_woman",
+          "candidate": 0
+        },
+        {
+          "person": "B_man",
+          "candidate": 3
+        },
+        {
+          "person": "B_woman",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 5700,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1025.6,
+            490.5,
+            1129.3,
+            714.2
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            473.0,
+            457.3,
+            597.7,
+            827.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            826.5,
+            469.1,
+            895.8,
+            601.4
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            986.9,
+            491.4,
+            1041.5,
+            601.5
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 1
+        },
+        {
+          "person": "A_woman",
+          "candidate": 0
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 6000,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1111.9,
+            468.7,
+            1324.2,
+            1024.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            342.1,
+            459.5,
+            530.9,
+            937.1
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            777.7,
+            462.7,
+            832.3,
+            600.2
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1027.2,
+            482.8,
+            1062.4,
+            572.2
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 1
+        },
+        {
+          "person": "A_woman",
+          "candidate": 0
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 6300,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1140.8,
+            452.0,
+            1327.1,
+            1074.8
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            211.4,
+            447.9,
+            379.8,
+            1075.8
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            669.0,
+            464.5,
+            709.2,
+            584.1
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            967.0,
+            479.0,
+            995.0,
+            577.1
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 6600,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1028.3,
+            487.3,
+            1156.1,
+            831.6
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            649.0,
+            522.1,
+            831.7,
+            715.6
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            831.8,
+            475.4,
+            916.2,
+            601.1
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1029.8,
+            495.1,
+            1065.4,
+            602.4
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 6900,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1449.3,
+            459.8,
+            1734.2,
+            1072.8
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            829.5,
+            466.9,
+            860.3,
+            550.4
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            961.0,
+            477.2,
+            994.1,
+            564.1
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "B_man",
+          "candidate": 1
+        },
+        {
+          "person": "B_woman",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 7200,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1042.7,
+            522.8,
+            1263.9,
+            1075.7
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            608.5,
+            461.6,
+            699.1,
+            697.5
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            961.2,
+            480.2,
+            993.9,
+            552.6
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            807.1,
+            466.9,
+            845.9,
+            566.2
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 3
+        },
+        {
+          "person": "B_woman",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 7500,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            534.6,
+            456.3,
+            722.7,
+            899.4
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            989.3,
+            466.1,
+            1093.3,
+            753.4
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 1
+        },
+        {
+          "person": "A_woman",
+          "candidate": 0
+        }
+      ]
+    },
+    {
+      "frame_number": 7800,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            926.7,
+            471.9,
+            1028.3,
+            695.7
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            595.8,
+            468.1,
+            705.6,
+            722.8
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            834.2,
+            487.0,
+            877.9,
+            585.3
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1005.8,
+            473.3,
+            1048.2,
+            586.7
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 3
+        },
+        {
+          "person": "B_woman",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 8100,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1346.6,
+            464.1,
+            1590.0,
+            1075.6
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            59.7,
+            453.9,
+            339.0,
+            998.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            806.4,
+            475.0,
+            834.1,
+            550.1
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1006.5,
+            471.1,
+            1034.8,
+            553.8
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 3
+        },
+        {
+          "person": "B_woman",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 8400,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            881.7,
+            467.5,
+            948.0,
+            691.5
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            659.0,
+            475.8,
+            772.1,
+            692.8
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            990.7,
+            472.9,
+            1042.6,
+            576.1
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 0
+        },
+        {
+          "person": "A_woman",
+          "candidate": 1
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 8700,
+      "split": "tune",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            0.3,
+            431.8,
+            272.4,
+            1071.5
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1261.6,
+            476.0,
+            1609.2,
+            1073.8
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1007.8,
+            472.0,
+            1048.3,
+            602.8
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            813.7,
+            478.8,
+            845.3,
+            550.5
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 1
+        },
+        {
+          "person": "A_woman",
+          "candidate": 0
+        },
+        {
+          "person": "B_man",
+          "candidate": 2
+        },
+        {
+          "person": "B_woman",
+          "candidate": 3
+        }
+      ]
+    }
+  ],
+  "notes": "Gold early window, team A near. Frames every 10 s. A person is listed only when visible in the frame; the near players regularly stand behind the camera's field of view, and far players are sometimes indistinguishable from people on the court behind."
+}

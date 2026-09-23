@@ -1,0 +1,733 @@
+{
+  "schema": "pbml.player_labels/v1",
+  "clip": "buzz",
+  "window": "buzz_b",
+  "video": "data/raw/The Better Buzz San Diego Open - 5.0 Men's Doubles - Pinoy Pickleball International (1080p).mp4",
+  "annotator": "claude (visual review of exported frames and crops)",
+  "created_at": "2026-09-22T20:33:04.839459+00:00",
+  "people": {
+    "N_beard": "bearded, black cap, white long-sleeve under a white tee, white shorts",
+    "N_red": "black cap, white tee, white shorts, red shoes",
+    "F_sleeve": "cream long-sleeve top, white cap, black leggings",
+    "F_tee": "white tee, black shorts, navy cap"
+  },
+  "instructions": "For every court player visible in the frame add {'person': <name>, 'candidate': <id>}; if the player is visible but has no candidate box, add {'person': <name>, 'box': null}. Leave players that are not visible out. Name the four people in 'people' by clothing, not by predicted ID.",
+  "frames": [
+    {
+      "frame_number": 32368,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1081.2,
+            435.6,
+            1224.9,
+            651.5
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            785.0,
+            454.0,
+            922.8,
+            659.1
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            828.9,
+            352.3,
+            882.7,
+            480.5
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1035.4,
+            351.2,
+            1093.6,
+            456.2
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_sleeve",
+          "candidate": 0
+        },
+        {
+          "person": "F_tee",
+          "candidate": 1
+        },
+        {
+          "person": "N_beard",
+          "candidate": 2
+        },
+        {
+          "person": "N_red",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 33268,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            738.1,
+            462.7,
+            886.7,
+            760.8
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1201.5,
+            467.6,
+            1318.9,
+            798.4
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            860.9,
+            343.1,
+            906.7,
+            467.8
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1032.5,
+            358.0,
+            1060.5,
+            437.9
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            1187.5,
+            360.5,
+            1253.9,
+            472.8
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "far players indistinguishable: shoes not visible"
+    },
+    {
+      "frame_number": 34168,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            978.9,
+            610.1,
+            1201.2,
+            1076.0
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            817.4,
+            336.0,
+            861.8,
+            449.2
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1051.7,
+            362.4,
+            1099.7,
+            520.2
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_tee",
+          "candidate": 0
+        },
+        {
+          "person": "N_beard",
+          "candidate": 1
+        },
+        {
+          "person": "N_red",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 35068,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1400.3,
+            563.8,
+            1727.9,
+            1079.0
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            579.9,
+            522.1,
+            797.9,
+            916.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1001.8,
+            352.0,
+            1053.8,
+            491.6
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            794.1,
+            360.2,
+            834.1,
+            532.4
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            878.4,
+            358.4,
+            907.5,
+            438.6
+          ]
+        },
+        {
+          "id": 5,
+          "box": [
+            959.9,
+            363.0,
+            984.7,
+            437.0
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_sleeve",
+          "candidate": 0
+        },
+        {
+          "person": "F_tee",
+          "candidate": 1
+        },
+        {
+          "person": "N_beard",
+          "candidate": 3
+        },
+        {
+          "person": "N_red",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 35968,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1413.3,
+            603.1,
+            1713.0,
+            1076.6
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            816.2,
+            338.9,
+            862.7,
+            446.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1051.0,
+            363.1,
+            1096.6,
+            519.6
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            440.3,
+            643.2,
+            629.6,
+            1076.4
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_sleeve",
+          "candidate": 0
+        },
+        {
+          "person": "F_tee",
+          "candidate": 3
+        },
+        {
+          "person": "N_beard",
+          "candidate": 1
+        },
+        {
+          "person": "N_red",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 36868,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1659.8,
+            614.4,
+            1919.6,
+            1075.1
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            724.5,
+            441.3,
+            812.1,
+            696.4
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1012.3,
+            342.7,
+            1056.9,
+            455.6
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            840.1,
+            345.8,
+            888.7,
+            460.5
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_sleeve",
+          "candidate": 0
+        },
+        {
+          "person": "F_tee",
+          "candidate": 1
+        },
+        {
+          "person": "N_beard",
+          "candidate": 3
+        },
+        {
+          "person": "N_red",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 37768,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1041.4,
+            344.2,
+            1093.6,
+            457.7
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1156.5,
+            408.6,
+            1252.9,
+            668.2
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            870.1,
+            336.2,
+            912.9,
+            447.5
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_sleeve",
+          "candidate": 1
+        },
+        {
+          "person": "N_beard",
+          "candidate": 2
+        },
+        {
+          "person": "N_red",
+          "candidate": 0
+        }
+      ]
+    },
+    {
+      "frame_number": 38668,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1186.5,
+            410.1,
+            1344.7,
+            648.5
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            799.0,
+            438.0,
+            923.6,
+            658.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            971.2,
+            363.0,
+            1047.4,
+            465.6
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            815.7,
+            366.8,
+            876.7,
+            489.0
+          ]
+        },
+        {
+          "id": 4,
+          "box": [
+            946.4,
+            357.6,
+            978.2,
+            439.3
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_sleeve",
+          "candidate": 0
+        },
+        {
+          "person": "F_tee",
+          "candidate": 1
+        },
+        {
+          "person": "N_beard",
+          "candidate": 3
+        },
+        {
+          "person": "N_red",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 39568,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1182.7,
+            500.3,
+            1380.8,
+            831.0
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            676.1,
+            498.0,
+            849.4,
+            771.5
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            987.2,
+            375.9,
+            1080.8,
+            520.4
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            831.9,
+            364.9,
+            888.8,
+            517.8
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_sleeve",
+          "candidate": 0
+        },
+        {
+          "person": "F_tee",
+          "candidate": 1
+        },
+        {
+          "person": "N_beard",
+          "candidate": 3
+        },
+        {
+          "person": "N_red",
+          "candidate": 2
+        }
+      ]
+    },
+    {
+      "frame_number": 40468,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1518.4,
+            570.8,
+            1805.8,
+            1078.6
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            832.8,
+            365.2,
+            918.9,
+            519.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            950.4,
+            683.7,
+            1169.2,
+            1077.2
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1069.6,
+            366.3,
+            1119.5,
+            491.0
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_sleeve",
+          "candidate": 0
+        },
+        {
+          "person": "F_tee",
+          "candidate": 2
+        },
+        {
+          "person": "N_beard",
+          "candidate": 1
+        },
+        {
+          "person": "N_red",
+          "candidate": 3
+        }
+      ]
+    },
+    {
+      "frame_number": 41368,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1299.4,
+            503.2,
+            1590.6,
+            891.5
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            988.8,
+            383.2,
+            1079.6,
+            520.0
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            979.7,
+            495.3,
+            1140.7,
+            807.8
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            828.6,
+            374.7,
+            911.9,
+            511.6
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_sleeve",
+          "candidate": 0
+        },
+        {
+          "person": "F_tee",
+          "candidate": 2
+        },
+        {
+          "person": "N_beard",
+          "candidate": 3
+        },
+        {
+          "person": "N_red",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 42268,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1286.4,
+            512.6,
+            1502.8,
+            1019.6
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            860.2,
+            363.4,
+            938.8,
+            518.9
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            754.3,
+            517.0,
+            879.8,
+            846.5
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1105.4,
+            371.5,
+            1158.6,
+            500.6
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "F_sleeve",
+          "candidate": 0
+        },
+        {
+          "person": "F_tee",
+          "candidate": 2
+        },
+        {
+          "person": "N_beard",
+          "candidate": 1
+        },
+        {
+          "person": "N_red",
+          "candidate": 3
+        }
+      ]
+    }
+  ],
+  "notes": "Buzz 9:00-12:00, held out. Same four people as buzz_a; by this window the black-shorts pair is near and the white-shorts pair is far, and they stay that way. The far pair is told apart by red versus white shoes; one frame where neither pair of shoes is visible is marked skip rather than guessed."
+}

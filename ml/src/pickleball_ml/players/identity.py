@@ -27,10 +27,24 @@ Which partner is which (assignment)
        result a few times. The cost gap to the best alternative assignment is
        kept as a per-row identity confidence.
 
-Assumes teams do not switch ends inside the processed window.
+Teams switch ends between games. The window is cut at manually supplied
+end-switch frames, each game segment is resolved independently as above, and
+players are then linked across each switch: the team that was near is now far,
+and which partner is which is decided by clothing color plus any tracker IDs
+that survived the changeover. Player identity and team (A/B) persist across the
+window; side (near/far) and slot are per frame.
+
+Confidence has two parts, because they fail independently. `identity_margin` is
+the cost gap of the partner assignment inside a segment. `switch_link_margin`
+is the gap between the chosen cross-switch pairing and the alternative, which
+is the number that collapses when both teams wear the same kit. A row is only
+`identity_confident` when both clear their thresholds, so a segment that is
+internally clean but joined by a coin flip does not claim to be certain.
 """
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
+from itertools import permutations
 from typing import Any, cast
 
 import networkx as nx
@@ -54,6 +68,12 @@ class IdentityConfig:
     near_position_noise_ft: float = 2.0
     far_position_noise_ft: float = 4.0
     box_height_jump_ratio: float = 1.5
+    # A standing person's box is taller than it is wide. Spectators leaning on a rail in
+    # front of the camera are detected head-and-shoulders only, which is wider than tall,
+    # and their feet project to a plausible court position, so geometry alone keeps them.
+    # Measured on this project's footage: on-court player boxes are above 1.13 at the 1st
+    # percentile, rail detections have a median of 0.71.
+    min_box_aspect: float = 1.1
     appearance_change_window: int = 15  # rows averaged on each side of a candidate split
     appearance_change_threshold: float = 0.45  # ~99.5th percentile within tracks on test clip
     max_gap_s: float = 30.0
@@ -69,6 +89,16 @@ class IdentityConfig:
     segment_switch_cost: float = 20.0
     prototype_iterations: int = 5
     confidence_margin: float = 5.0
+    # Linking players across an end switch: how much one shared tracker ID is worth,
+    # in the same units as the clothing distance (0-1 per player). Teams in matching
+    # kit give the colour evidence almost nothing to work with, so continuity of the
+    # tracker through the changeover decides those cases.
+    switch_continuity_weight: float = 0.5
+    # How much better the chosen cross-switch pairing must be than the alternative, in
+    # the same clothing-distance units, before the players it joins count as confident.
+    # Provisional: the two switches measured so far scored 0.04 (wrong, both teams in
+    # white) and 0.26-0.42 (right, teams in distinct colours).
+    switch_margin: float = 0.15
 
 
 @dataclass(frozen=True)
@@ -90,7 +120,9 @@ def split_tracklets(
     detections: pd.DataFrame, source_fps: float, stride: int, config: IdentityConfig
 ) -> pd.DataFrame:
     """Tracked rows with smoothed court position, `segment_id`, and `tracklet_id` columns."""
-    rows = detections[detections["track_id"] >= 0].sort_values(["track_id", "frame_number"])
+    tracked = detections[detections["track_id"] >= 0]
+    aspect = (tracked["y2"] - tracked["y1"]) / (tracked["x2"] - tracked["x1"]).replace(0, np.nan)
+    rows = tracked[aspect >= config.min_box_aspect].sort_values(["track_id", "frame_number"])
     rows = rows.reset_index(drop=True)
     if rows.empty:
         return rows.assign(smooth_x=pd.Series(dtype=float), smooth_y=pd.Series(dtype=float),
@@ -423,21 +455,182 @@ def _viterbi(
     return labels, margins
 
 
+PLAYER_COLUMNS = [
+    "frame_number", "timestamp_ms", "player_id", "team", "side", "slot", "track_id",
+    "segment_id", "tracklet_id", "x1", "y1", "x2", "y2", "confidence", "image_x", "image_y",
+    "court_x", "court_y", "smooth_x", "smooth_y", "truncated", "identity_margin",
+    "switch_link_margin", "identity_confident",
+]
+
+
 def resolve_identities(
     detections: pd.DataFrame, source_fps: float, stride: int, frame_height: int,
-    config: IdentityConfig,
+    config: IdentityConfig, end_switch_frames: Sequence[int] = (),
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Per-frame rows for the resolved players, and per-side diagnostics."""
-    columns = ["frame_number", "timestamp_ms", "player_id", "team", "slot", "track_id",
-               "segment_id", "tracklet_id", "x1", "y1", "x2", "y2", "confidence",
-               "image_x", "image_y", "court_x", "court_y", "smooth_x", "smooth_y", "truncated",
-               "identity_margin", "identity_confident"]
+    """Per-frame rows for the resolved players, and diagnostics.
+
+    `end_switch_frames` are frames where the teams have changed ends (a game
+    boundary). Player IDs 1-2 are team A, the near team at the start of the
+    window; 3-4 are team B.
+    """
+    bounds = _game_bounds(detections, end_switch_frames)
+    games: list[tuple[pd.DataFrame, dict[str, Any], dict[int, Descriptor | None],
+                      dict[int, set[int]]]] = []
+    for start, end in bounds:
+        in_game = (detections["frame_number"] >= start) & (detections["frame_number"] < end)
+        games.append(_resolve_game(detections[in_game], source_fps, stride, config))
+
+    diagnostics: dict[str, Any] = dict(games[0][1]) if len(games) == 1 else {
+        "tracklets": sum(g[1]["tracklets"] for g in games),
+        "near": None, "far": None,
+    }
+    diagnostics["games"] = []
+    # local player id (1-2 near, 3-4 far in that game) -> persistent player id
+    mapping = {1: 1, 2: 2, 3: 3, 4: 4}
+    reference: dict[int, Descriptor | None] = {}  # clothing prototypes by persistent ID
+    reference_tracks: dict[int, set[int]] = {}  # tracker IDs seen per persistent ID
+    # Weakest cross-switch link each player has been carried through so far. A player
+    # whose identity rests on a coin-flip link is not confident afterwards, however clean
+    # the tracking inside the segment looks.
+    link_margin: dict[int, float] = dict.fromkeys((1, 2, 3, 4), INF)
+    parts = []
+    id_offset = 0  # keep segment/tracklet IDs unique across games
+    for index, ((start, end), (players, game_diagnostics, prototypes, tracks)) in enumerate(
+        zip(bounds, games, strict=True)
+    ):
+        link: dict[str, Any] = {}
+        if index > 0:
+            mapping, link = _link_across_switch(mapping, reference, prototypes,
+                                                reference_tracks, tracks, config)
+            for pid, margin in link.get("player_margins", {}).items():
+                link_margin[int(pid)] = min(link_margin[int(pid)], float(margin))
+        reference = {mapping[k]: v for k, v in prototypes.items()}
+        reference_tracks = {mapping[k]: v for k, v in tracks.items()}
+        diagnostics["games"].append({
+            "start_frame": None if start == -INF else int(start),
+            "end_frame": None if end == INF else int(end),
+            "local_to_player": {str(k): v for k, v in mapping.items()},
+            "switch_link": link, "sides": {side: game_diagnostics.get(side) for side in SIDES},
+        })
+        if not players.empty:
+            players = players.copy()
+            players["side"] = np.where(players["player_id"] <= config.players_per_side,
+                                       "near", "far")
+            players["player_id"] = players["player_id"].map(mapping)
+            players["switch_link_margin"] = players["player_id"].map(link_margin)
+            players["segment_id"] += id_offset
+            players["tracklet_id"] += id_offset
+            id_offset = int(max(players["segment_id"].max(), players["tracklet_id"].max())) + 1
+            parts.append(players)
+
+    if not parts:
+        return pd.DataFrame(columns=PLAYER_COLUMNS), diagnostics
+    players = pd.concat(parts, ignore_index=True)
+    players["team"] = np.where(players["player_id"] <= config.players_per_side, "A", "B")
+    players["identity_confident"] &= players["switch_link_margin"] >= config.switch_margin
+    players["image_x"] = (players["x1"] + players["x2"]) / 2.0
+    players["image_y"] = players["y2"]
+    players["truncated"] = players["y2"] >= frame_height - 2
+    players["slot"] = _assign_slots(players)
+    return (players[PLAYER_COLUMNS].sort_values(["frame_number", "player_id"])
+            .reset_index(drop=True), diagnostics)
+
+
+def _game_bounds(
+    detections: pd.DataFrame, end_switch_frames: Sequence[int]
+) -> list[tuple[float, float]]:
+    """[start, end) frame ranges of each game segment in the window."""
+    switches = sorted(int(f) for f in end_switch_frames)
+    if switches and len(detections):
+        first, last = detections["frame_number"].min(), detections["frame_number"].max()
+        outside = [f for f in switches if f <= first or f > last]
+        if outside:
+            raise ValueError(f"end-switch frames {outside} are outside the processed window "
+                             f"({first}-{last})")
+    edges: list[float] = [-INF, *switches, INF]
+    return list(zip(edges, edges[1:], strict=False))
+
+
+def _link_across_switch(
+    previous: dict[int, int], before: dict[int, Descriptor | None],
+    after: dict[int, Descriptor | None], before_tracks: dict[int, set[int]],
+    after_tracks: dict[int, set[int]], config: IdentityConfig,
+) -> tuple[dict[int, int], dict[str, Any]]:
+    """Persistent player ID for each local player of the next game.
+
+    `previous` maps the previous game's local IDs to persistent IDs; `before` holds
+    clothing prototypes by persistent ID, `after` by the new game's local ID, and the
+    `*_tracks` maps hold the raw tracker IDs each player was built from. The team that
+    was near (local 1-2) is now far (local 3-4) and vice versa; within each team the
+    partner assignment with the lowest cost wins, where cost is clothing distance minus
+    a reward for every tracker ID the two share. A player the tracker followed around
+    the net keeps their ID, which is the only usable signal when both partners wear the
+    same kit.
+    """
+    near_before = [previous[1], previous[2]]
+    far_before = [previous[3], previous[4]]
+    mapping: dict[int, int] = {}
+    evidence: dict[str, Any] = {}
+    margins: dict[int, float] = {}
+    for local_ids, persistent_ids in (((3, 4), near_before), ((1, 2), far_before)):
+        costs = []
+        for order in permutations(persistent_ids):
+            colour = sum(appearance_distance(after.get(local), before.get(pid))
+                         for local, pid in zip(local_ids, order, strict=True))
+            shared = sum(len(after_tracks.get(local, set()) & before_tracks.get(pid, set()))
+                         for local, pid in zip(local_ids, order, strict=True))
+            costs.append((colour - config.switch_continuity_weight * shared, order, colour,
+                          shared))
+        costs.sort(key=lambda item: item[0])
+        best_cost, best, best_colour, best_shared = costs[0]
+        mapping.update(dict(zip(local_ids, best, strict=True)))
+        margin = costs[1][0] - best_cost
+        evidence[f"local_{local_ids[0]}{local_ids[1]}"] = {
+            "players": list(best), "cost": round(best_cost, 3),
+            "alternative_cost": round(costs[1][0], 3), "margin": round(margin, 3),
+            "color_cost": round(best_colour, 3), "shared_track_ids": best_shared,
+        }
+        for pid in best:
+            margins[pid] = margin
+    evidence["switch_color_cost"] = round(_team_cost(mapping, before, after), 3)
+    no_switch = {1: previous[1], 2: previous[2], 3: previous[3], 4: previous[4]}
+    evidence["no_switch_color_cost"] = round(_best_team_cost(no_switch, before, after), 3)
+    evidence["player_margins"] = {str(k): round(v, 3) for k, v in sorted(margins.items())}
+    return mapping, evidence
+
+
+def _team_cost(mapping: dict[int, int], before: dict[int, Descriptor | None],
+               after: dict[int, Descriptor | None]) -> float:
+    return sum(appearance_distance(after.get(local), before.get(pid))
+               for local, pid in mapping.items())
+
+
+def _best_team_cost(mapping: dict[int, int], before: dict[int, Descriptor | None],
+                    after: dict[int, Descriptor | None]) -> float:
+    """Lowest color cost of `mapping` allowing partners to be swapped within each team."""
+    total = 0.0
+    for pair in ((1, 2), (3, 4)):
+        ids = [mapping[pair[0]], mapping[pair[1]]]
+        total += min(
+            sum(appearance_distance(after.get(local), before.get(pid))
+                for local, pid in zip(pair, order, strict=True))
+            for order in permutations(ids)
+        )
+    return total
+
+
+def _resolve_game(
+    detections: pd.DataFrame, source_fps: float, stride: int, config: IdentityConfig,
+) -> tuple[pd.DataFrame, dict[str, Any], dict[int, Descriptor | None], dict[int, set[int]]]:
+    """Players of one game segment with local IDs (1-2 near, 3-4 far), diagnostics, a
+    clothing prototype per local ID, and the tracker IDs each was built from."""
     rows = split_tracklets(detections, source_fps, stride, config)
     tracklets = summarize_tracklets(rows, config)
     frames_by_tracklet = {cast(int, k): np.sort(g.to_numpy()) for k, g in
                           rows.groupby("tracklet_id")["frame_number"]}
     player_of: dict[int, int] = {}
     margin_of: dict[int, float] = {}
+    prototypes: dict[int, Descriptor | None] = {}
     diagnostics: dict[str, Any] = {"tracklets": len(tracklets)}
     for side_index, side in enumerate(SIDES):
         side_tracklets = [t for t in tracklets if t.side == side]
@@ -454,6 +647,8 @@ def resolve_identities(
                 continue
             player_of[t.tracklet_id] = base + order.index(label)
             margin_of[t.tracklet_id] = assignment.margin[t.tracklet_id]
+        for label in (0, 1):
+            prototypes[base + order.index(label)] = assignment.prototypes[label]
         a, b = assignment.prototypes
         diagnostics[side] = {
             "tracklets": len(side_tracklets),
@@ -465,19 +660,15 @@ def resolve_identities(
 
     players = rows[rows["tracklet_id"].isin(list(player_of))].copy()
     if players.empty:
-        return pd.DataFrame(columns=columns), diagnostics
+        return players, diagnostics, prototypes, {}
     players["player_id"] = players["tracklet_id"].map(player_of)
-    players["team"] = np.where(players["player_id"] <= config.players_per_side, "near", "far")
     players["identity_margin"] = players["tracklet_id"].map(margin_of)
     players["identity_confident"] = players["identity_margin"] >= config.confidence_margin
     players = (players.sort_values(["player_id", "frame_number", "tracklet_id"])
                .drop_duplicates(["player_id", "frame_number"], keep="first"))
-    players["image_x"] = (players["x1"] + players["x2"]) / 2.0
-    players["image_y"] = players["y2"]
-    players["truncated"] = players["y2"] >= frame_height - 2
-    players["slot"] = _assign_slots(players)
-    return players[columns].sort_values(["frame_number", "player_id"]).reset_index(drop=True), \
-        diagnostics
+    tracks = {cast(int, pid): {int(t) for t in group} for pid, group in
+              players.groupby("player_id")["track_id"]}
+    return players, diagnostics, prototypes, tracks
 
 
 def _assign_slots(players: pd.DataFrame) -> pd.Series:
@@ -485,11 +676,11 @@ def _assign_slots(players: pd.DataFrame) -> pd.Series:
 
     A lone player on a half is assigned by which side of the center line they stand.
     """
-    group = players.groupby(["frame_number", "team"])["smooth_x"]
+    group = players.groupby(["frame_number", "side"])["smooth_x"]
     count = group.transform("count")
     rank = group.rank(method="first")
     is_left = np.where(count >= 2, rank == 1, players["smooth_x"] < 0)
-    return players["team"] + np.where(is_left, "_left", "_right")
+    return players["side"] + np.where(is_left, "_left", "_right")
 
 
 def run_record(
@@ -505,6 +696,7 @@ def run_record(
         "frames": frames_processed,
         "sides": {side: diagnostics.get(side) for side in SIDES},
         "tracklets": diagnostics.get("tracklets"),
+        "games": diagnostics.get("games"),
         "frames_with_4_players": int((per_frame == 4).sum()),
         "frames_with_4_players_rate": round(float((per_frame == 4).sum()) / frames_processed, 4)
         if frames_processed else None,

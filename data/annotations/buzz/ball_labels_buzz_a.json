@@ -1,0 +1,233 @@
+{
+  "schema": "pbml.ball_labels/v1",
+  "clip": "buzz",
+  "window": "buzz_a",
+  "video": "data/raw/The Better Buzz San Diego Open - 5.0 Men's Doubles - Pinoy Pickleball International (1080p).mp4",
+  "annotator": "claude (colour-search candidates confirmed by eye on zoomed crops)",
+  "created_at": "2026-09-22T20:29:08.912089+00:00",
+  "method": "Every 60th processed frame (about 2 s apart). Candidate ball positions came from an independent HSV colour search for small bright yellow-green blobs inside the court region, with positions that recur in most frames (fixed background) removed. Each frame's top candidates were confirmed on a zoomed crop. 'visible' is a confirmed ball belonging to this court; 'absent' means no ball of this court was found among the eight candidates or on review, which can mislabel a ball fully hidden behind a player. Balls on the neighbouring courts are never labeled.",
+  "frames": [
+    {
+      "frame_number": 5395,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 5515,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        1233.0,
+        820.6
+      ]
+    },
+    {
+      "frame_number": 5635,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        704.2,
+        773.6
+      ]
+    },
+    {
+      "frame_number": 5755,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        758.2,
+        784.3
+      ]
+    },
+    {
+      "frame_number": 5875,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        873.3,
+        564.4
+      ]
+    },
+    {
+      "frame_number": 5995,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 6115,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        531.4,
+        852.4
+      ]
+    },
+    {
+      "frame_number": 6235,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 6355,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 6475,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 6595,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 6715,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 6835,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 6955,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        844.8,
+        435.9
+      ]
+    },
+    {
+      "frame_number": 7075,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 7195,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 7315,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 7435,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        1090.1,
+        748.1
+      ]
+    },
+    {
+      "frame_number": 7555,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        699.8,
+        709.3
+      ]
+    },
+    {
+      "frame_number": 7675,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        746.6,
+        777.6
+      ]
+    },
+    {
+      "frame_number": 7795,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        997.0,
+        435.5
+      ]
+    },
+    {
+      "frame_number": 7915,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 8035,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 8155,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 8275,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 8395,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        1066.2,
+        469.3
+      ]
+    },
+    {
+      "frame_number": 8515,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        1239.4,
+        675.5
+      ]
+    },
+    {
+      "frame_number": 8635,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        1515.8,
+        722.2
+      ]
+    },
+    {
+      "frame_number": 8755,
+      "split": "tune",
+      "state": "absent",
+      "xy": null
+    },
+    {
+      "frame_number": 8875,
+      "split": "tune",
+      "state": "visible",
+      "xy": [
+        965.4,
+        509.0
+      ]
+    }
+  ]
+}

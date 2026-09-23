@@ -1,0 +1,546 @@
+{
+  "schema": "pbml.player_labels/v1",
+  "clip": "gold",
+  "window": "gold_late",
+  "video": "data/raw/Gold Medal Match Pickleball Senior Mixed Doubles 3.5 60-65 Gold Medal Match Fall Brawl.mp4",
+  "annotator": "claude (visual review of exported frames and crops)",
+  "created_at": "2026-09-22T20:08:43.040309+00:00",
+  "people": {
+    "A_man": "team A man: navy short-sleeve shirt, white shorts, white hair (far side here)",
+    "A_woman": "team A woman: lavender/navy top, dark shorts, visor (far side here)",
+    "B_man": "team B man: navy or pink patterned shirt, pink shorts (near side here)",
+    "B_woman": "team B woman: light-blue tank top, black shorts, black knee sleeves (near side)"
+  },
+  "instructions": "For every court player visible in the frame add {'person': <name>, 'candidate': <id>}; if the player is visible but has no candidate box, add {'person': <name>, 'box': null}. Leave players that are not visible out. Name the four people in 'people' by clothing, not by predicted ID.",
+  "frames": [
+    {
+      "frame_number": 129599,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            34.1,
+            437.2,
+            300.3,
+            1074.0
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1236.9,
+            544.9,
+            1406.4,
+            1074.6
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            806.2,
+            459.3,
+            850.6,
+            588.3
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1026.7,
+            469.8,
+            1066.1,
+            561.3
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 2
+        },
+        {
+          "person": "A_woman",
+          "candidate": 3
+        },
+        {
+          "person": "B_man",
+          "candidate": 0
+        },
+        {
+          "person": "B_woman",
+          "candidate": 1
+        }
+      ]
+    },
+    {
+      "frame_number": 130049,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            762.7,
+            507.5,
+            1034.7,
+            1076.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            492.5,
+            449.1,
+            686.2,
+            781.1
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1006.2,
+            466.7,
+            1033.6,
+            560.7
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "far pair not both visible and distinguishable at this range: the two team A players wear similar dark tops and are ~40 px tall, so an identity label would be a guess"
+    },
+    {
+      "frame_number": 130499,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1150.4,
+            501.8,
+            1295.8,
+            871.5
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            487.8,
+            460.2,
+            564.8,
+            649.3
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1015.2,
+            466.0,
+            1056.2,
+            563.9
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            831.7,
+            463.6,
+            869.7,
+            554.4
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 2
+        },
+        {
+          "person": "A_woman",
+          "candidate": 3
+        },
+        {
+          "person": "B_man",
+          "candidate": 1
+        },
+        {
+          "person": "B_woman",
+          "candidate": 0
+        }
+      ]
+    },
+    {
+      "frame_number": 130949,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1044.2,
+            503.2,
+            1156.1,
+            688.2
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            787.9,
+            477.7,
+            924.4,
+            685.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            953.4,
+            476.0,
+            1005.8,
+            593.9
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "far pair not both visible and distinguishable at this range: the two team A players wear similar dark tops and are ~40 px tall, so an identity label would be a guess"
+    },
+    {
+      "frame_number": 131399,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1490.3,
+            527.1,
+            1717.4,
+            1075.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            663.2,
+            457.5,
+            768.8,
+            716.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1006.5,
+            466.6,
+            1031.5,
+            561.8
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            865.0,
+            462.7,
+            900.9,
+            558.8
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "far pair not both visible and distinguishable at this range: the two team A players wear similar dark tops and are ~40 px tall, so an identity label would be a guess"
+    },
+    {
+      "frame_number": 131849,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            76.0,
+            433.3,
+            278.1,
+            1076.0
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1015.3,
+            465.6,
+            1047.2,
+            563.1
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            849.6,
+            463.9,
+            876.5,
+            557.6
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "far pair not both visible and distinguishable at this range: the two team A players wear similar dark tops and are ~40 px tall, so an identity label would be a guess"
+    },
+    {
+      "frame_number": 132299,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1088.5,
+            495.2,
+            1213.0,
+            872.2
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1399.4,
+            467.8,
+            1535.5,
+            797.4
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            756.9,
+            471.5,
+            806.2,
+            634.4
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            1057.1,
+            466.7,
+            1087.7,
+            568.9
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 3
+        },
+        {
+          "person": "A_woman",
+          "candidate": 2
+        },
+        {
+          "person": "B_man",
+          "candidate": 1
+        },
+        {
+          "person": "B_woman",
+          "candidate": 0
+        }
+      ]
+    },
+    {
+      "frame_number": 132749,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            0.3,
+            528.5,
+            270.1,
+            1075.2
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            997.4,
+            488.9,
+            1097.2,
+            796.0
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "far pair not both visible and distinguishable at this range: the two team A players wear similar dark tops and are ~40 px tall, so an identity label would be a guess"
+    },
+    {
+      "frame_number": 133199,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1022.9,
+            486.2,
+            1111.0,
+            695.4
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1012.4,
+            464.7,
+            1039.2,
+            561.1
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            864.2,
+            462.5,
+            894.2,
+            558.7
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "far pair not both visible and distinguishable at this range: the two team A players wear similar dark tops and are ~40 px tall, so an identity label would be a guess"
+    },
+    {
+      "frame_number": 133649,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            957.6,
+            464.6,
+            991.2,
+            570.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            881.4,
+            463.9,
+            919.6,
+            570.3
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            786.0,
+            458.4,
+            844.0,
+            722.6
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "far pair not both visible and distinguishable at this range: the two team A players wear similar dark tops and are ~40 px tall, so an identity label would be a guess"
+    },
+    {
+      "frame_number": 134099,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            801.9,
+            480.7,
+            951.0,
+            691.3
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            1129.1,
+            497.4,
+            1225.7,
+            694.7
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            1006.6,
+            472.0,
+            1087.9,
+            601.5
+          ]
+        }
+      ],
+      "players": [],
+      "skip": true,
+      "note": "far pair not both visible and distinguishable at this range: the two team A players wear similar dark tops and are ~40 px tall, so an identity label would be a guess"
+    },
+    {
+      "frame_number": 134549,
+      "split": "test",
+      "candidates": [
+        {
+          "id": 0,
+          "box": [
+            1170.5,
+            524.1,
+            1303.0,
+            894.5
+          ]
+        },
+        {
+          "id": 1,
+          "box": [
+            615.8,
+            469.6,
+            766.2,
+            913.1
+          ]
+        },
+        {
+          "id": 2,
+          "box": [
+            927.2,
+            462.5,
+            1003.1,
+            599.1
+          ]
+        },
+        {
+          "id": 3,
+          "box": [
+            799.7,
+            479.1,
+            875.0,
+            594.1
+          ]
+        }
+      ],
+      "players": [
+        {
+          "person": "A_man",
+          "candidate": 2
+        },
+        {
+          "person": "A_woman",
+          "candidate": 3
+        },
+        {
+          "person": "B_man",
+          "candidate": 1
+        },
+        {
+          "person": "B_woman",
+          "candidate": 0
+        }
+      ]
+    }
+  ],
+  "notes": "Gold held-out window at 72:00-75:00; the teams have changed ends, so team B is near. Late-afternoon sun and long shadows. Only frames where every visible player could be identified with confidence are labeled; the rest are marked skip, which keeps the far-pair ambiguity out of the metrics instead of guessing an identity."
+}
