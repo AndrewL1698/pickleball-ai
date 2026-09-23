@@ -113,6 +113,22 @@ Exit criteria:
 
 A user can upload a video and see a match record move through a mock/background processing job.
 
+Status (2026-09-23): checkpoint 1 of 3 done - the backend foundation. A FastAPI
+service accepts a multipart upload, records a `Video` and an `AnalysisJob` in
+PostgreSQL, stores the file behind a storage interface, and enqueues the job on
+Redis; an RQ worker claims it and drives it to `ready` or `failed`. Migrations
+are Alembic-only. Details and the environment reference are in `docs/BACKEND.md`.
+
+The processing is a **placeholder** that fingerprints the file rather than
+analyzing it, so the exit criterion is not met yet: there is no web app, and no
+`Match` entity.
+
+Remaining:
+
+- checkpoint 2: Next.js app, match list, upload form, processing-status UI
+- checkpoint 3: `Match` entity, real metadata extraction in the worker
+  (`pickleball_ml.video.reader.read_metadata`), video playback in the app
+
 ---
 
 ## Phase 2 - Court Calibration

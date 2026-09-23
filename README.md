@@ -40,7 +40,15 @@ sampled windows, camera comparison across four fixed-camera matches, measured
 player-tracking metrics, and a first ball-tracking baseline. Results and the
 exit-criterion assessment are in `docs/PHASE_0B_RESULTS.md`.
 
-There is no web app, API, or database yet. See `docs/ROADMAP.md`.
+Phase 1 (full-stack skeleton) has started. Its first checkpoint adds the
+backend foundation: a FastAPI service that accepts a video upload, records it
+in PostgreSQL, stores the file behind a storage interface, and queues an
+analysis job that a Redis/RQ worker picks up and drives to completion. The
+processing itself is still a **placeholder** -- it fingerprints the file rather
+than analyzing it, so the plumbing can be finished before the expensive
+computer vision is wired in. There is no web app yet.
+
+See `docs/ROADMAP.md`, and `docs/BACKEND.md` for the backend in detail.
 
 ## Development Setup
 
@@ -48,9 +56,16 @@ Requirements: [uv](https://docs.astral.sh/uv/) (it installs Python 3.13 automati
 
 ```bash
 uv sync                 # create .venv and install the workspace
-uv run pytest           # unit tests
-uv run ruff check ml    # lint
+uv run pytest           # unit tests (no database, Redis, or video needed)
+uv run ruff check .     # lint
 uv run mypy             # type check
+```
+
+Tests that need a live PostgreSQL and Redis are marked and skipped by default:
+
+```bash
+docker compose up -d postgres redis
+uv run pytest -m integration
 ```
 
 Pretrained detector weights are downloaded into `weights/` (gitignored) on first use.
@@ -62,6 +77,48 @@ published weights from [WASB-SBDT](https://github.com/nttcom/WASB-SBDT)):
 ```bash
 uvx gdown 14AeyIOCQ2UaQmbZLNQJa1H_eSwxUXk7z -O weights/wasb/wasb_tennis_best.pth.tar
 ```
+
+## Running the Backend (Phase 1)
+
+The API and the worker are Python packages in the same uv workspace as `ml/`:
+`apps/api` (`pickleball_api`) and `workers/video_processor` (`pickleball_worker`).
+PostgreSQL and Redis run in Docker; the Python processes run natively, because
+the worker will need the GPU once real processing lands and Docker on macOS
+cannot reach it.
+
+```bash
+cp .env.example .env              # defaults match the compose file; no secrets in it
+docker compose up -d postgres redis
+uv run alembic -c apps/api/alembic.ini upgrade head
+```
+
+Then, in two terminals:
+
+```bash
+uv run pbapi                      # http://127.0.0.1:8000, --reload while developing
+uv run pbworker                   # consumes the analysis queue; --burst to exit when empty
+```
+
+Upload a video and watch the job run:
+
+```bash
+curl -s http://127.0.0.1:8000/health
+curl -s http://127.0.0.1:8000/ready
+
+# Upload. Returns the video, its id, and the job created for it.
+curl -s -X POST http://127.0.0.1:8000/api/videos -F "file=@data/raw/testclip.mp4"
+
+curl -s http://127.0.0.1:8000/api/videos
+curl -s http://127.0.0.1:8000/api/videos/<video_id>
+curl -s http://127.0.0.1:8000/api/jobs/<job_id>
+```
+
+The job moves `queued -> running -> ready`, or `-> failed` with a code and a
+short message. Interactive API docs are at http://127.0.0.1:8000/docs.
+
+Uploads are written to `data/uploads/` (gitignored) under a generated key, never
+under the uploaded filename. Every environment variable, the full endpoint list,
+the migration commands and the current limitations are in `docs/BACKEND.md`.
 
 ## Running the Phase 0 Pipeline
 
@@ -267,6 +324,10 @@ See `docs/ML_PIPELINE.md`.
 ## Data Model
 
 See `docs/DATA_MODEL.md`.
+
+## Backend
+
+See `docs/BACKEND.md`.
 
 ## Project Scope
 

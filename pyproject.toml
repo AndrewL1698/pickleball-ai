@@ -3,10 +3,12 @@ name = "pickleball-ai"
 version = "0.1.0"
 description = "Pickleball match intelligence monorepo"
 requires-python = ">=3.13,<3.14"
-dependencies = ["pickleball-ml"]
+dependencies = ["pickleball-ml", "pickleball-api", "pickleball-worker"]
 
 [dependency-groups]
 dev = [
+    "fakeredis>=2.26",
+    "httpx>=0.28",
     "mypy>=1.13",
     "pandas-stubs>=2.2",
     "pytest>=8",
@@ -19,13 +21,19 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["ml"]
+members = ["ml", "apps/api", "workers/video_processor"]
 
 [tool.uv.sources]
 pickleball-ml = { workspace = true }
+pickleball-api = { workspace = true }
+pickleball-worker = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["ml/tests"]
+testpaths = ["ml/tests", "apps/api/tests", "workers/video_processor/tests"]
+# Integration tests need a live PostgreSQL and Redis (docker compose up -d),
+# so the default run stays hermetic. Run them with: uv run pytest -m integration
+markers = ["integration: needs a live PostgreSQL and Redis"]
+addopts = "-m 'not integration'"
 
 [tool.ruff]
 line-length = 100
@@ -37,12 +45,14 @@ extend-exclude = ["ml/src/pickleball_ml/ball/wasb_hrnet.py"]
 select = ["E", "F", "I", "B", "UP", "SIM"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["pickleball_ml"]
+known-first-party = ["pickleball_api", "pickleball_ml", "pickleball_worker"]
 
 [tool.mypy]
 python_version = "3.13"
 strict = true
-files = ["ml/src"]
+# Sources only, matching the existing convention: the two test suites each
+# have a conftest.py, and mypy cannot tell two modules of the same name apart.
+files = ["ml/src", "apps/api/src", "workers/video_processor/src"]
 
 [[tool.mypy.overrides]]
 module = ["pickleball_ml.ball.wasb_hrnet"]

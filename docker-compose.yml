@@ -1,0 +1,91 @@
+# Backend dependencies for local development.
+#
+#   docker compose up -d postgres redis      # just the databases (the usual case)
+#   docker compose --profile app up -d       # ...plus the API and the worker
+#
+# Postgres and Redis are published on 127.0.0.1 only. Both are unauthenticated
+# enough for development that binding them to every interface would put an open
+# database on whatever network the laptop is on.
+#
+# The API and worker containers are optional, and off by default. On Apple
+# Silicon the worker will eventually need the GPU, which Docker on macOS cannot
+# reach, so the intended local setup is: dependencies in Docker, Python
+# natively (see README).
+
+name: pickleball
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: pickleball
+      POSTGRES_PASSWORD: pickleball
+      POSTGRES_DB: pickleball
+    ports:
+      # 5433, not 5432: a developer machine often already runs PostgreSQL on the
+      # default port, and taking it over would be rude. The URL in .env.example
+      # points here.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pickleball -d pickleball"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["uv", "run", "pbapi", "--host", "0.0.0.0"]
+    environment:
+      PICKLEBALL_DATABASE_URL: postgresql+psycopg://pickleball:pickleball@postgres:5432/pickleball
+      PICKLEBALL_REDIS_URL: redis://redis:6379/0
+      PICKLEBALL_UPLOAD_DIR: /data/uploads
+      # Inside the container the app is reached as `api`, so that host must pass
+      # the trusted-host check as well.
+      PICKLEBALL_TRUSTED_HOSTS: '["localhost","127.0.0.1","api"]'
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["uv", "run", "pbworker"]
+    environment:
+      PICKLEBALL_DATABASE_URL: postgresql+psycopg://pickleball:pickleball@postgres:5432/pickleball
+      PICKLEBALL_REDIS_URL: redis://redis:6379/0
+      PICKLEBALL_UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  uploads:

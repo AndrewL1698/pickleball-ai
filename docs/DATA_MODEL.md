@@ -2,6 +2,18 @@
 
 This document gives a conceptual schema. Exact implementation may evolve.
 
+Implementation status: Phase 1 checkpoint 1 ships two of these tables, under
+shorter names, because the entities they would hang off do not exist yet:
+
+| Here | In the database today |
+|---|---|
+| `VideoAsset` | `videos`, minus the decoded metadata (no decoder runs yet) and with no `match_id` |
+| `ProcessingJob` | `analysis_jobs`, plus an `error_code` column |
+| `Match` | not yet; it arrives with the calibrations, players and rallies it exists to own |
+
+The job status vocabulary below is the implemented one (`ready`, not
+`succeeded`, so that it matches `Match.status`). See `BACKEND.md`.
+
 Conventions:
 
 - Court coordinates (`court_x`, `court_y`, `*_court_x`, `*_court_y`) are in feet, using the court coordinate system in `ARCHITECTURE.md` (origin at net center, negative Y on the camera side).
@@ -54,13 +66,18 @@ Because phone video is often variable frame rate, derive timestamps from decoded
 id
 match_id
 stage                # INGESTED / METADATA_READY / COURT_READY / ...
-status               # queued / running / succeeded / failed
+status               # queued / running / ready / failed
 progress
 model_run_id         # nullable; model details live in ModelRun
-error_message
+error_code           # stable, machine-readable reason for a failure
+error_message        # a fixed sentence chosen by the code, never str(exception)
 started_at
 completed_at
 ```
+
+`error_message` is never interpolated from an exception: a database error's text
+contains the connection string, password included, and most others carry
+absolute filesystem paths. The traceback is logged on the server instead.
 
 ## CourtCalibration
 

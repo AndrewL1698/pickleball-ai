@@ -1,6 +1,10 @@
 # --- Data, videos, model weights (never commit) ---
 data/raw/
 data/processed/
+# Uploads arrive through the API; the extension patterns below do not cover a
+# key with no extension, or the .part file a half-finished upload leaves.
+data/uploads/
+*.part
 # Annotations: track only small hand-authored JSON label files; ignore everything else
 # (crops, exported frames, generated artifacts) under data/annotations/.
 data/annotations/**
