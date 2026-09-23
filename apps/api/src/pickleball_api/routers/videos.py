@@ -139,5 +139,3 @@ def read_video(session: SessionDep, video_id: UUID) -> VideoDetail:
     if video is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such video.")
     return VideoDetail.of(video)
-
-

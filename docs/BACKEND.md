@@ -336,14 +336,24 @@ logged with their traceback and answered with one sentence.
 
 ## What Is Left
 
-Checkpoint 3 of Phase 1 (checkpoint 2 added the web app; see `FRONTEND.md`):
+Phase 1 is complete; everything below is later-phase work.
 
-- a `Match` entity, so a video belongs to something calibrations can hang off
-- real video metadata extraction (fps, dimensions, duration, frame count,
-  rotation) via `pickleball_ml.video.reader.read_metadata`, replacing the
-  placeholder processor
-- serving uploaded video back to the browser, which needs its own decisions
-  about origin, `Content-Disposition`, and `X-Content-Type-Options`
+**Prerequisites for Phase 2 (court calibration).** None of these are gaps in
+Phase 1 — they are the groundwork calibration needs, and Phase 2 should build
+them before the calibration UI itself:
+
+- A `Match` entity, so a video belongs to something that `CourtCalibration`,
+  `Player` and `Rally` can hang off. `DATA_MODEL.md` describes it;
+  `videos.match_id` is the migration that introduces it.
+- Real video metadata extraction — fps, dimensions, duration, frame count,
+  rotation — via `pickleball_ml.video.reader.read_metadata`, replacing
+  `PlaceholderProcessor` behind the existing `VideoProcessor` interface. The
+  calibration UI cannot place landmarks on a frame the backend has never
+  decoded.
+- Serving uploaded video back to the browser, which needs its own decisions
+  about origin, `Content-Disposition` and `X-Content-Type-Options`; an mp4 that
+  is also valid HTML is a stored-XSS vector if it is served from the app's own
+  origin. Clicking landmarks on a frame requires this.
 
 Known gaps in what is here:
 

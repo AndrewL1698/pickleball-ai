@@ -40,21 +40,28 @@ sampled windows, camera comparison across four fixed-camera matches, measured
 player-tracking metrics, and a first ball-tracking baseline. Results and the
 exit-criterion assessment are in `docs/PHASE_0B_RESULTS.md`.
 
-Phase 1 (full-stack skeleton) is in progress. Two of its three checkpoints are
-done:
+Phase 1 (full-stack skeleton) is complete. All three of its checkpoints are
+done, and it passed its exit criterion: a video can be uploaded and watched
+through a background processing job, in the browser.
 
 - A FastAPI service that accepts a video upload, records it in PostgreSQL,
   stores the file behind a storage interface, and queues an analysis job that a
   Redis/RQ worker picks up and drives to completion (`docs/BACKEND.md`).
 - A Next.js app for uploading a video, listing what has been uploaded, and
   following a job through its states (`docs/FRONTEND.md`).
+- Integration and hardening: the whole stack starts from a clean checkout,
+  natively or with `docker compose --profile app`, with migrations applied by
+  the stack rather than by hand.
 
-The processing itself is still a **placeholder**: it fingerprints the file
+The processing itself is a **placeholder**: it fingerprints the uploaded file
 rather than analysing it, so the plumbing could be finished before the
-expensive computer vision is wired in. The web app says so on the page rather
-than presenting a finished-looking result.
+expensive computer vision is wired in. No video is decoded, and there is no
+`Match` entity — the app says "Videos" because that is what it stores. The web
+app states this on the page rather than presenting a finished-looking result.
 
-See `docs/ROADMAP.md` for what remains.
+Phase 2 (court calibration) is next, and has to introduce the `Match`
+ownership model, real metadata extraction and secure video playback before the
+calibration UI itself. See `docs/ROADMAP.md`.
 
 ## Development Setup
 

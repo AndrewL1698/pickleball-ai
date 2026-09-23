@@ -179,7 +179,7 @@ progress checklist; and the metadata the server does not have is stated as not
 extracted rather than shown as blank fields or zeros.
 
 Nothing is called a "match". The backend stores videos, and `Match` arrives in
-checkpoint 3.
+Phase 2, which needs it before the calibration UI can hang off anything.
 
 ## Accessibility
 

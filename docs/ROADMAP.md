@@ -104,14 +104,23 @@ Build:
 - Next.js app
 - FastAPI service
 - PostgreSQL database
-- Match page
+- video list and per-video page
 - video upload
 - background processing-job abstraction
 - processing status UI
 
 Exit criteria:
 
-A user can upload a video and see a match record move through a mock/background processing job.
+A user can upload a video and watch its persistent record move through a
+mock/background processing job in the browser.
+
+Scope note: this phase was originally written around a "Match page" and a
+"match record". `Match` was deliberately deferred — it exists to own
+calibrations, players and rallies, none of which exist yet, and an entity with
+one field and no children is harder to review than the migration that adds it
+later. The skeleton therefore persists `Video` and `AnalysisJob`, and the
+exit criterion above is the revised one that was actually met. Phase 2
+introduces `Match`.
 
 Status (2026-09-23): checkpoint 1 of 3 done - the backend foundation. A FastAPI
 service accepts a multipart upload, records a `Video` and an `AnalysisJob` in
@@ -172,6 +181,15 @@ Carried into later phases:
 ## Phase 2 - Court Calibration
 
 Start with manual calibration. Homography math and the CLI tool already exist from Phase 0; this phase brings calibration into the app.
+
+Three prerequisites come first, because the calibration UI cannot be built
+without them (see `docs/BACKEND.md`):
+
+- the `Match` ownership model, so a calibration has something to belong to
+- real video metadata extraction in the worker
+  (`pickleball_ml.video.reader.read_metadata`), replacing the placeholder
+- secure playback of the uploaded video, so a landmark can be clicked on a
+  frame — served from an origin that is not the app's own
 
 Build:
 
