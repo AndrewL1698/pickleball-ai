@@ -104,20 +104,92 @@ Build:
 - Next.js app
 - FastAPI service
 - PostgreSQL database
-- Match page
+- video list and per-video page
 - video upload
 - background processing-job abstraction
 - processing status UI
 
 Exit criteria:
 
-A user can upload a video and see a match record move through a mock/background processing job.
+A user can upload a video and watch its persistent record move through a
+mock/background processing job in the browser.
+
+Scope note: this phase was originally written around a "Match page" and a
+"match record". `Match` was deliberately deferred — it exists to own
+calibrations, players and rallies, none of which exist yet, and an entity with
+one field and no children is harder to review than the migration that adds it
+later. The skeleton therefore persists `Video` and `AnalysisJob`, and the
+exit criterion above is the revised one that was actually met. Phase 2
+introduces `Match`.
+
+Status (2026-09-23): checkpoint 1 of 3 done - the backend foundation. A FastAPI
+service accepts a multipart upload, records a `Video` and an `AnalysisJob` in
+PostgreSQL, stores the file behind a storage interface, and enqueues the job on
+Redis; an RQ worker claims it and drives it to `ready` or `failed`. Migrations
+are Alembic-only. Details and the environment reference are in `docs/BACKEND.md`.
+
+At that point the processing was a placeholder and there was no web app, so the
+exit criterion was not yet met.
+
+Status (2026-09-23): checkpoint 2 of 3 done - the upload and status interface.
+A Next.js App Router app (`apps/web`) with three pages: upload a video by
+picker or drag-and-drop with validation before and after submission, a list of
+everything uploaded with its latest job status, and a per-video status page
+that polls only while the job is non-terminal. Typed API client, hermetic
+Vitest suite plus an opt-in suite against the running stack. Details in
+`docs/FRONTEND.md`.
+
+The collection is called "Videos", not "Matches": `Match` does not exist yet.
+The UI states plainly that no analysis is performed.
+
+Status (2026-09-23): checkpoint 3 of 3 done - integration and hardening.
+**Phase 1 passes its exit criterion**: a video can be uploaded and watched
+through a background processing job, in the browser, from a documented clean
+checkout.
+
+Verified end to end, against both the native and the containerised stack:
+PostgreSQL and Redis start, Alembic migrations create the schema (never an
+application side effect), the API and worker start, the frontend starts, an
+upload returns persistent video and job identifiers, the job is observed moving
+`queued -> running -> ready` with real progress, the record survives a refresh,
+and a deliberately broken job reaches `failed` with a safe error code. Re-running
+a finished job leaves its verdict untouched.
+
+What the exit criterion does **not** claim: the processing is a placeholder that
+fingerprints the uploaded file. No video is analysed, no frame is decoded, and
+no `Match` entity exists. Those are Phase 2 and Phase 3 work, and the interface
+they will replace (`pickleball_worker.processors.VideoProcessor`) is deliberately
+the only thing that has to change.
+
+Carried into later phases:
+
+- Real video metadata extraction in the worker
+  (`pickleball_ml.video.reader.read_metadata`), replacing the placeholder.
+- A `Match` entity, so calibrations, players and rallies have an owner. Until
+  then the UI deliberately says "Videos", never "Matches".
+- Serving uploaded video back to the browser for playback, which needs its own
+  decisions about origin and content headers.
+- No reaper for a job whose worker was killed, and no retry endpoint, so the
+  `failed -> queued` transition is unreachable over HTTP.
+- No authentication, so every upload is visible to anyone who can reach the
+  port; the API binds to loopback for that reason.
+- No browser-driven test. The opt-in suite drives the real components against
+  the running stack in jsdom, which covers the data flow but not a real click.
 
 ---
 
 ## Phase 2 - Court Calibration
 
 Start with manual calibration. Homography math and the CLI tool already exist from Phase 0; this phase brings calibration into the app.
+
+Three prerequisites come first, because the calibration UI cannot be built
+without them (see `docs/BACKEND.md`):
+
+- the `Match` ownership model, so a calibration has something to belong to
+- real video metadata extraction in the worker
+  (`pickleball_ml.video.reader.read_metadata`), replacing the placeholder
+- secure playback of the uploaded video, so a landmark can be clicked on a
+  frame — served from an origin that is not the app's own
 
 Build:
 

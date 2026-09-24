@@ -1,0 +1,16 @@
+[project]
+name = "pickleball-worker"
+version = "0.1.0"
+description = "RQ worker that runs analysis jobs for uploaded videos"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "pickleball-api",
+    "rq>=2",
+]
+
+[project.scripts]
+pbworker = "pickleball_worker.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"

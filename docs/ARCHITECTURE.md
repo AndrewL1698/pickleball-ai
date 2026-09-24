@@ -234,19 +234,18 @@ Because uploaded match videos may contain identifiable people:
 
 ## Deployment Phases
 
-### CV Prototype (current)
+### CV Prototype
 - `pbml` command-line tool from the `ml/` package
 - one test video in `data/raw/`
 - stage outputs as files in `data/processed/<video_name>/`
 - no database, queue, API, or web app
 - runs natively on Apple Silicon using the PyTorch `mps` device (Docker on macOS cannot use the GPU)
 
-### Local Prototype
-- Next.js dev server
-- FastAPI
-- PostgreSQL
-- local video directory
-- local ML process
+### Local Prototype (current)
+- Next.js dev server (`apps/web`; see `FRONTEND.md`)
+- FastAPI, PostgreSQL, Redis + RQ worker (see `BACKEND.md`)
+- local video directory behind a storage interface
+- local ML process, still the Phase 0 CLI rather than a worker stage
 
 ### Portfolio Deployment
 - frontend hosting

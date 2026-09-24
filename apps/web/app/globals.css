@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+/*
+ * Colour tokens are defined for both schemes and the dark values are checked
+ * against their own surface: light-mode text that is readable on white is not
+ * readable on slate-900, so an inverted palette is not a dark mode.
+ */
+:root {
+  --background: #ffffff;
+  --surface: #f8fafc;
+  --border: #e2e8f0;
+  --foreground: #0f172a;
+  --muted: #475569;
+  --accent: #1d4ed8;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0b1120;
+    --surface: #111c33;
+    --border: #1e293b;
+    --foreground: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #93b4fd;
+    /* Lets the file picker button, scrollbars and native focus rings follow. */
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-border-subtle: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/*
+ * One focus style, applied everywhere interactive. `focus-visible` so a mouse
+ * click does not paint a ring, and an outline rather than a box-shadow so it
+ * follows border-radius and stays visible over any background.
+ */
+@utility focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+/*
+ * Nothing in this app animates to convey meaning, so switching every animation
+ * off for people who ask for that costs nothing.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,39 @@
+# Both images build from the repository root, so this is the file Docker reads.
+# A .dockerignore next to a Dockerfile is only consulted as
+# <dockerfile>.dockerignore, which is why this lives here.
+#
+# Without it the context is ~9 GB: uploaded video, the Python venv, model
+# weights and node_modules all get sent to the daemon on every build, and the
+# host's macOS-built node_modules would overwrite the image's Linux ones.
+
+.git
+.gitignore
+
+# Data, weights and local environments: large, and never wanted in an image.
+data/
+weights/
+runs/
+experiments/
+.venv/
+**/node_modules/
+**/.next/
+**/out/
+
+# Caches and test output
+**/__pycache__/
+**/*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+**/coverage/
+.walkthroughs/
+
+# Secrets. The template is kept so the image can document its own settings.
+**/.env
+**/.env.*
+!**/.env.example
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/

@@ -40,17 +40,55 @@ sampled windows, camera comparison across four fixed-camera matches, measured
 player-tracking metrics, and a first ball-tracking baseline. Results and the
 exit-criterion assessment are in `docs/PHASE_0B_RESULTS.md`.
 
-There is no web app, API, or database yet. See `docs/ROADMAP.md`.
+Phase 1 (full-stack skeleton) is complete. All three of its checkpoints are
+done, and it passed its exit criterion: a video can be uploaded and watched
+through a background processing job, in the browser.
+
+- A FastAPI service that accepts a video upload, records it in PostgreSQL,
+  stores the file behind a storage interface, and queues an analysis job that a
+  Redis/RQ worker picks up and drives to completion (`docs/BACKEND.md`).
+- A Next.js app for uploading a video, listing what has been uploaded, and
+  following a job through its states (`docs/FRONTEND.md`).
+- Integration and hardening: the whole stack starts from a clean checkout,
+  natively or with `docker compose --profile app`, with migrations applied by
+  the stack rather than by hand.
+
+The processing itself is a **placeholder**: it fingerprints the uploaded file
+rather than analysing it, so the plumbing could be finished before the
+expensive computer vision is wired in. No video is decoded, and there is no
+`Match` entity — the app says "Videos" because that is what it stores. The web
+app states this on the page rather than presenting a finished-looking result.
+
+Phase 2 (court calibration) is next, and has to introduce the `Match`
+ownership model, real metadata extraction and secure video playback before the
+calibration UI itself. See `docs/ROADMAP.md`.
 
 ## Development Setup
 
-Requirements: [uv](https://docs.astral.sh/uv/) (it installs Python 3.13 automatically). ML code runs natively; on Apple Silicon it uses the PyTorch `mps` device.
+Prerequisites:
+
+- [uv](https://docs.astral.sh/uv/) — installs Python 3.13 automatically
+- [Node.js](https://nodejs.org/) 20.9 or newer (24 is what the web image uses), for the frontend
+- Docker Desktop, for PostgreSQL and Redis
+
+ML code runs natively; on Apple Silicon it uses the PyTorch `mps` device.
+
+Run every backend command from the repository root: the upload directory and
+`.env` are resolved relative to the working directory, so running from
+elsewhere quietly uses a different store.
 
 ```bash
 uv sync                 # create .venv and install the workspace
-uv run pytest           # unit tests
-uv run ruff check ml    # lint
+uv run pytest           # unit tests (no database, Redis, or video needed)
+uv run ruff check .     # lint
 uv run mypy             # type check
+```
+
+Tests that need a live PostgreSQL and Redis are marked and skipped by default:
+
+```bash
+docker compose up -d postgres redis
+uv run pytest -m integration
 ```
 
 Pretrained detector weights are downloaded into `weights/` (gitignored) on first use.
@@ -62,6 +100,89 @@ published weights from [WASB-SBDT](https://github.com/nttcom/WASB-SBDT)):
 ```bash
 uvx gdown 14AeyIOCQ2UaQmbZLNQJa1H_eSwxUXk7z -O weights/wasb/wasb_tennis_best.pth.tar
 ```
+
+## Running the Backend (Phase 1)
+
+The API and the worker are Python packages in the same uv workspace as `ml/`:
+`apps/api` (`pickleball_api`) and `workers/video_processor` (`pickleball_worker`).
+PostgreSQL and Redis run in Docker; the Python processes run natively, because
+the worker will need the GPU once real processing lands and Docker on macOS
+cannot reach it.
+
+```bash
+cp .env.example .env              # defaults match the compose file; no secrets in it
+docker compose up -d postgres redis
+uv run alembic -c apps/api/alembic.ini upgrade head
+```
+
+Then, in two terminals:
+
+```bash
+uv run pbapi                      # http://127.0.0.1:8000, --reload while developing
+uv run pbworker                   # consumes the analysis queue; --burst to exit when empty
+```
+
+Upload a video and watch the job run:
+
+```bash
+curl -s http://127.0.0.1:8000/health
+curl -s http://127.0.0.1:8000/ready
+
+# Upload any mp4/mov/m4v. Returns the video, its id, and the job created for it.
+curl -s -X POST http://127.0.0.1:8000/api/videos -F "file=@/path/to/your/match.mp4"
+
+curl -s http://127.0.0.1:8000/api/videos
+curl -s http://127.0.0.1:8000/api/videos/<video_id>
+curl -s http://127.0.0.1:8000/api/jobs/<job_id>
+```
+
+The job moves `queued -> running -> ready`, or `-> failed` with a code and a
+short message. Interactive API docs are at http://127.0.0.1:8000/docs.
+
+Uploads are written to `data/uploads/` (gitignored) under a generated key, never
+under the uploaded filename. Every environment variable, the full endpoint list,
+the migration commands and the current limitations are in `docs/BACKEND.md`.
+
+## Running the Frontend (Phase 1)
+
+The web app is a Next.js application in `apps/web`. It is a browser client for
+the API above, so start the backend first.
+
+```bash
+cd apps/web
+npm install
+cp .env.example .env.local      # defaults already point at a local API
+npm run dev                     # http://localhost:3000
+```
+
+Three pages: upload a video, see everything uploaded, and follow one video's
+processing job. The job page polls while the job is queued or running and stops
+once it is ready or failed.
+
+Without `uv run pbworker` running, an upload stays `queued` for ever: nothing
+else consumes the queue. The page says as much.
+
+```bash
+npm test                        # hermetic; needs no API and no network
+npm run lint
+npm run typecheck
+npm run build
+npm run check:contract          # needs the API up; catches type drift
+```
+
+Everything in containers instead, including the web app. The profile brings up
+five services — PostgreSQL, Redis, a one-shot `migrate` job, the API, the worker
+and the web app — and applies the migrations itself:
+
+```bash
+docker compose --profile app up -d --build
+```
+
+The two paths keep uploads in different places: a host process writes
+`data/uploads`, the containers share a Docker volume.
+
+Full details, environment variables, the polling design and the current
+limitations are in `docs/FRONTEND.md`.
 
 ## Running the Phase 0 Pipeline
 
@@ -267,6 +388,14 @@ See `docs/ML_PIPELINE.md`.
 ## Data Model
 
 See `docs/DATA_MODEL.md`.
+
+## Backend
+
+See `docs/BACKEND.md`.
+
+## Frontend
+
+See `docs/FRONTEND.md`.
 
 ## Project Scope
 
