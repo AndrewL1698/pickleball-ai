@@ -1,21 +1,21 @@
 # Frontend
 
-The Next.js app added in Phase 1 checkpoint 2. It covers uploading a video and
-following the processing job that results. The backend it talks to is described
-in `BACKEND.md`.
+The Next.js app added in Phase 1 checkpoint 2 and moved from "Videos" to
+"Matches" in Phase 2 checkpoint 1. It covers uploading a match's video and
+following the processing job that results. The backend it talks to is
+described in `BACKEND.md`.
 
-## What This Checkpoint Does and Does Not Do
+## What It Does and Does Not Do
 
 It does: take a video by file picker or drag-and-drop, validate it before and
-after submission, upload it, list what has been uploaded, and follow one
-video's job through `queued`, `running`, `ready` and `failed` — polling only
-while the answer can still change, and surviving a refresh or a revisit because
-the server is the only source of truth.
+after submission, upload it as a new match, list every match, and follow one
+match's status and its job through `queued`, `running`, `ready` and `failed` —
+polling only while the answer can still change, and surviving a refresh or a
+revisit because the server is the only source of truth.
 
-It does not play video, show analysis results, or mention matches. There is no
-`Match` entity yet, nothing serves the uploaded file back, and processing is a
-placeholder that records a checksum. The UI says so, on the page, in as many
-words.
+It does not play video, calibrate the court, or show analysis results. Nothing
+serves the uploaded file back, and processing is a placeholder that records a
+checksum. The UI says so, on the page, in as many words.
 
 ## Structure
 
@@ -25,16 +25,16 @@ apps/web/
 │   ├── layout.tsx              # shell: skip link, nav, main landmark, footer
 │   ├── globals.css             # Tailwind v4 import, colour tokens, focus ring
 │   ├── page.tsx                # "/" upload page
-│   ├── videos/page.tsx         # "/videos" list
-│   ├── videos/[videoId]/page.tsx  # "/videos/:id" status, awaits `params`
+│   ├── matches/page.tsx        # "/matches" list
+│   ├── matches/[matchId]/page.tsx # "/matches/:id" match status, awaits `params`
 │   ├── error.tsx               # route error boundary (Next 16 `retry` prop)
 │   └── not-found.tsx
 ├── components/
 │   ├── SiteHeader.tsx          # nav, marks the current section
 │   ├── UploadForm.tsx          # the picker, drop zone, validation, in-flight lock
-│   ├── VideoListView.tsx       # loading / empty / error / populated
-│   ├── VideoStatusView.tsx     # the polling page
-│   ├── StatusBadge.tsx         # word + glyph + colour, never colour alone
+│   ├── MatchListView.tsx       # loading / empty / error / populated
+│   ├── MatchDetailView.tsx     # the polling page
+│   ├── StatusBadge.tsx         # job and match badges: word + glyph + colour, never colour alone
 │   ├── PlaceholderNotice.tsx   # "this build does not analyse video yet"
 │   ├── Notice.tsx              # boxed message, caller chooses the ARIA role
 │   ├── RefreshButton.tsx       # shared, so its aria-disabled handling cannot drift
@@ -45,7 +45,8 @@ apps/web/
 │   ├── types.ts                # hand-written mirrors of the Pydantic schemas
 │   ├── files.ts                # client-side upload validation
 │   ├── format.ts               # timestamps and durations
-│   └── status.ts               # the words used for each job status
+│   └── status.ts               # the words used for each job and match status
+├── next.config.ts              # includes the legacy /videos redirects
 ├── scripts/check-contract.mjs  # fails if lib/types.ts drifts from the API
 ├── vitest.shared.mts           # the settings both suites must agree on
 └── tests/                      # Vitest; tests/live/ is opt-in
@@ -96,14 +97,26 @@ docker compose --profile app up -d --build
 
 | Route | Purpose |
 |---|---|
-| `/` | Upload a video. Drag-and-drop or file picker, validation, links to the new video |
-| `/videos` | Everything uploaded, newest first, each with its latest job status |
-| `/videos/:id` | One video: its details, its job's state, and a manual refresh |
+| `/` | Upload a match. Drag-and-drop or file picker, validation, links to the new match |
+| `/matches` | Every match, newest first: name, file, upload date, and match status |
+| `/matches/:id` | One match: its status, its video, its latest job's state, earlier attempts, and a manual refresh |
+| `/videos` | Redirects (307) to `/matches` |
+| `/videos/:id` | Redirects (307) to `/matches/:id` |
 
-`/videos/:id` is the job page. It polls `GET /api/videos/{id}` rather than
-`GET /api/jobs/{id}` because that single response carries the video, its latest
-job and every earlier attempt, so the page needs one request per tick — and
-there is no endpoint that lists jobs.
+`/matches/:id` polls `GET /api/matches/{id}` rather than `GET /api/jobs/{id}`
+because that single response carries the match, its video, its latest job and
+every earlier attempt, so the page needs one request per tick — and there is no
+endpoint that lists jobs.
+
+The `/videos` redirects are declared in `next.config.ts` (and tested in
+`tests/redirects.test.ts`) rather than kept as pages, so there is only one
+implementation of each view. `/videos/:id` maps straight onto `/matches/:id`
+because migration 0003 gave each Phase 1 video a match with the same id. They
+are temporary redirects so no browser caches them permanently.
+
+A match is named after its upload's filename, without the extension, and that
+name is the page title and the list link. The original filename is shown as
+metadata under **Video**.
 
 ## Environment Variables
 
@@ -137,10 +150,14 @@ JSON, or the caller aborted — all reach the UI as one `ApiError` carrying a
 sentence worth showing a person.
 
 Types in `lib/types.ts` are hand-written rather than generated: the contract is
-two entities and a code generator would be more machinery than it earns. The
+three entities and a code generator would be more machinery than it earns. The
 guard against drift is `npm run check:contract`, which reads the OpenAPI schema
-the running API serves and compares field names and enum values against the
-declarations. Run it after any change to the API's schemas.
+the running API serves and compares field names and enum values (`JobStatus`,
+`JobStage`, `MatchStatus`) against the declarations, and checks that the
+routes the client calls exist. Run it after any change to the API's schemas.
+
+The client calls `listMatches`, `getMatch`, `createMatch` (the upload) and
+`getJob`.
 
 ## Polling
 
@@ -178,8 +195,11 @@ there is no results link; the unimplemented pipeline stages are not drawn as a
 progress checklist; and the metadata the server does not have is stated as not
 extracted rather than shown as blank fields or zeros.
 
-Nothing is called a "match". The backend stores videos, and `Match` arrives in
-Phase 2, which needs it before the calibration UI can hang off anything.
+The match status follows the same rules. A match whose job finished is
+**Needs calibration**, in amber rather than green, with a sentence saying
+calibration is not available in this build yet. There is no "Ready" match
+badge, because the API has no such status. Tests assert that no match status
+label or description reads as a finished analysis.
 
 ## Accessibility
 
@@ -225,7 +245,7 @@ as a file part, so a multipart upload from jsdom is serialised as a plain text
 field and the API answers 422. A real browser has no such problem. So
 `01-upload.live.test.ts` runs in a Node environment where the globals behave
 like a browser's, and `02-status.live.test.tsx` runs in jsdom, where ordinary
-GET requests work, and renders the components against the video the first file
+GET requests work, and renders the components against the match the first file
 uploaded.
 
 ## Troubleshooting
@@ -262,8 +282,10 @@ one of them once on a clean checkout.
   the body by then, so a 1.5 GB file that is not really a video still takes a
   full upload to fail.
 - **No pagination.** The list requests the default page of 100 and shows no
-  total, because `VideoList.count` is the length of that page rather than a
-  count of all rows. Past 100 videos the oldest simply do not appear.
+  total, because `MatchList.count` is the length of that page rather than a
+  count of all rows. Past 100 matches the oldest simply do not appear.
+- **No renaming.** A match keeps its filename-derived name; the API has no
+  endpoint to change it or to set `recorded_at`.
 - **No retry for a failed job**, because the API exposes no endpoint for it.
 - **No delete, no playback, no authentication**, matching the backend.
 - **No browser-driven test.** The live suite drives the real components against

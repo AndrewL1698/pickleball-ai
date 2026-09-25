@@ -6,8 +6,8 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, getJob, listVideos, uploadVideo } from "@/lib/api";
-import { JOB_READY, VIDEO_DETAIL, jsonResponse, videoFile } from "./fixtures";
+import { ApiError, createMatch, getJob, getMatch, listMatches } from "@/lib/api";
+import { JOB_READY, MATCH_DETAIL, jsonResponse, videoFile } from "./fixtures";
 
 function mockFetch(implementation: (...args: never[]) => Promise<Response>) {
   const fetchMock = vi.fn(implementation);
@@ -15,18 +15,27 @@ function mockFetch(implementation: (...args: never[]) => Promise<Response>) {
   return fetchMock;
 }
 
-describe("listVideos", () => {
+describe("listMatches", () => {
   it("returns the parsed body", async () => {
-    mockFetch(async () => jsonResponse({ videos: [], count: 0 }));
-    await expect(listVideos()).resolves.toEqual({ videos: [], count: 0 });
+    mockFetch(async () => jsonResponse({ matches: [], count: 0 }));
+    await expect(listMatches()).resolves.toEqual({ matches: [], count: 0 });
   });
 
   it("calls the configured base URL and asks for no caching", async () => {
-    const fetchMock = mockFetch(async () => jsonResponse({ videos: [], count: 0 }));
-    await listVideos();
+    const fetchMock = mockFetch(async () => jsonResponse({ matches: [], count: 0 }));
+    await listMatches();
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toMatch(/\/api\/videos$/);
+    expect(url).toMatch(/\/api\/matches$/);
     expect(init.cache).toBe("no-store");
+  });
+});
+
+describe("getMatch", () => {
+  it("asks for one match by id, escaped", async () => {
+    const fetchMock = mockFetch(async () => jsonResponse(MATCH_DETAIL));
+    await expect(getMatch("a/b")).resolves.toMatchObject({ id: MATCH_DETAIL.id });
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toMatch(/\/api\/matches\/a%2Fb$/);
   });
 });
 
@@ -63,7 +72,7 @@ describe("error handling", () => {
     mockFetch(async () => {
       throw new TypeError("Failed to fetch");
     });
-    const error = (await listVideos().catch((e: unknown) => e)) as ApiError;
+    const error = (await listMatches().catch((e: unknown) => e)) as ApiError;
     expect(error.code).toBe("unreachable");
     expect(error.message).toMatch(/Is it running\?/);
   });
@@ -82,15 +91,16 @@ describe("error handling", () => {
   });
 });
 
-describe("uploadVideo", () => {
+describe("createMatch", () => {
   beforeEach(() => {
-    mockFetch(async () => jsonResponse(VIDEO_DETAIL, 201));
+    mockFetch(async () => jsonResponse(MATCH_DETAIL, 201));
   });
 
-  it("posts the file under the field name the API expects", async () => {
-    const fetchMock = mockFetch(async () => jsonResponse(VIDEO_DETAIL, 201));
-    await uploadVideo(videoFile("match.mp4"));
-    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  it("posts the file to the matches collection under the field name the API expects", async () => {
+    const fetchMock = mockFetch(async () => jsonResponse(MATCH_DETAIL, 201));
+    await createMatch(videoFile("match.mp4"));
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/api\/matches$/);
     expect(init.method).toBe("POST");
     const body = init.body as FormData;
     expect(body.get("file")).toBeInstanceOf(File);
@@ -98,8 +108,8 @@ describe("uploadVideo", () => {
   });
 
   it("never sets Content-Type, which would break the multipart boundary", async () => {
-    const fetchMock = mockFetch(async () => jsonResponse(VIDEO_DETAIL, 201));
-    await uploadVideo(videoFile());
+    const fetchMock = mockFetch(async () => jsonResponse(MATCH_DETAIL, 201));
+    await createMatch(videoFile());
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.headers).toBeUndefined();
   });
@@ -111,15 +121,17 @@ describe("uploadVideo", () => {
         415,
       ),
     );
-    await expect(uploadVideo(videoFile("x.mp4"))).rejects.toThrow(
+    await expect(createMatch(videoFile("x.mp4"))).rejects.toThrow(
       "Only .m4v, .mov, .mp4 files are accepted.",
     );
   });
 
-  it("returns the created video with its job", async () => {
-    const created = await uploadVideo(videoFile());
+  it("returns the created match with its video and job", async () => {
+    const created = await createMatch(videoFile());
+    expect(created.video?.original_filename).toBe("demo.mp4");
     expect(created.jobs).toHaveLength(1);
     expect(created.latest_job?.status).toBe("queued");
+    expect(created.latest_job?.match_id).toBe(created.id);
   });
 });
 

@@ -14,7 +14,7 @@
  *   must not present `running` as a step that has to be seen.
  */
 
-import type { JobStatus } from "./types";
+import type { JobStatus, MatchStatus } from "./types";
 
 export interface StatusCopy {
   /** The word on the badge. Matches the API's own vocabulary. */
@@ -62,3 +62,34 @@ export const STATUS_COPY: Record<JobStatus, StatusCopy> = {
 export function isFinished(status: JobStatus): boolean {
   return status === "ready" || status === "failed";
 }
+
+/**
+ * What each match status means. The match status is the summary a person
+ * sees first, so it carries the same honesty rules: `calibration_required`
+ * says what comes next and admits the build cannot do it yet, and nothing
+ * here says "ready" or "analysed".
+ */
+export const MATCH_STATUS_COPY: Record<MatchStatus, { label: string; description: string }> = {
+  uploaded: {
+    label: "Uploaded",
+    description: "The video is stored and waiting to be processed.",
+  },
+  processing: {
+    label: "Processing",
+    description: "A worker is processing the video.",
+  },
+  calibration_required: {
+    label: "Needs calibration",
+    description:
+      "The file check finished. The court has to be calibrated next, and calibration is not available in this build yet.",
+  },
+  court_ready: {
+    label: "Court calibrated",
+    description:
+      "The court is calibrated. Player tracking, ball tracking and match statistics are not available yet.",
+  },
+  failed: {
+    label: "Failed",
+    description: "The latest processing attempt failed.",
+  },
+};

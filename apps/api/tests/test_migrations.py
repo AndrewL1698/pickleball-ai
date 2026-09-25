@@ -16,7 +16,13 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from sqlalchemy import Engine, create_engine, text
-from tests_support_api import ALEMBIC_INI
+from tests_support_api import (
+    ALEMBIC_INI,
+    PHASE_1,
+    assert_downgraded,
+    assert_upgraded,
+    seed_phase_1,
+)
 
 from pickleball_api.config import get_settings
 from pickleball_api.models import Base
@@ -74,4 +80,31 @@ def test_migrations_can_be_rolled_back(fresh_database: str) -> None:
             text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
         ).scalars().all()
     engine.dispose()
-    assert "videos" not in tables and "analysis_jobs" not in tables
+    assert not {"matches", "videos", "analysis_jobs"} & set(tables)
+
+
+def test_phase_1_rows_survive_the_match_migration_both_ways(fresh_database: str) -> None:
+    """Migration 0003 on real data: every video becomes a match, every job
+    follows it, and the downgrade gives all of them back."""
+    config = alembic_config(fresh_database)
+    command.upgrade(config, PHASE_1)
+    engine = create_engine(fresh_database)
+    try:
+        with engine.begin() as connection:
+            seeded = seed_phase_1(connection)
+
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert_upgraded(connection, seeded)
+
+        command.downgrade(config, PHASE_1)
+        with engine.connect() as connection:
+            assert_downgraded(connection, seeded)
+
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert_upgraded(connection, seeded)
+            context = MigrationContext.configure(connection, opts={"compare_type": True})
+            assert compare_metadata(context, Base.metadata) == []
+    finally:
+        engine.dispose()

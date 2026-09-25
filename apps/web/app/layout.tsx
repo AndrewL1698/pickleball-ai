@@ -8,7 +8,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 
 export const metadata: Metadata = {
   title: { default: "Pickleball AI", template: "%s · Pickleball AI" },
-  description: "Upload pickleball match footage and follow its processing job.",
+  description: "Upload pickleball match footage and follow each match's processing job.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -30,7 +30,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         </main>
         <footer className="border-t border-border-subtle px-4 py-6 text-sm text-muted">
           <p className="mx-auto max-w-3xl">
-            Phase 1 prototype. Uploads are checked and recorded; no match analysis runs yet.
+            Phase 2 prototype. Matches are uploaded, checked and recorded; court calibration
+            and match analysis are not available yet.
           </p>
         </footer>
       </body>

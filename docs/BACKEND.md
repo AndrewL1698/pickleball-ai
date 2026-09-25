@@ -1,15 +1,16 @@
 # Backend
 
 The FastAPI service, the database, the storage layer and the job worker added in
-Phase 1. This document covers what exists after checkpoint 1; the architecture
+Phase 1 and re-parented under `Match` in Phase 2 checkpoint 1. The architecture
 this is heading towards is in `ARCHITECTURE.md`, and the eventual schema is in
 `DATA_MODEL.md`.
 
-## What This Checkpoint Does and Does Not Do
+## What This Does and Does Not Do
 
-It does: accept a video upload, record it, store the file, queue a job, let a
-worker claim that job and drive it through `queued -> running -> ready` (or
-`failed`), and expose enough over HTTP for a frontend to list and inspect both.
+It does: accept a video upload as a new match, store the file, record the match,
+its video and a job, queue the job, let a worker claim it and drive it through
+`queued -> running -> ready` (or `failed`) while the match's status follows,
+and expose enough over HTTP for a frontend to list and inspect matches.
 
 It does not analyze anything. The worker runs a **placeholder processor** that
 reads the stored file and records its SHA-256. That is deliberate: the job
@@ -18,8 +19,8 @@ getting right on its own, and it can be tested in milliseconds rather than
 minutes. The real processor replaces one object behind one interface
 (`pickleball_worker.processors.VideoProcessor`).
 
-There is no authentication and no `Match` entity yet. The web app that drives
-this API arrived in checkpoint 2; see `FRONTEND.md`.
+There is no authentication, no calibration and no real metadata extraction
+yet. The web app that drives this API is described in `FRONTEND.md`.
 
 ## Directory Structure
 
@@ -29,22 +30,22 @@ apps/api/                              # package `pickleball_api`
 ├── Dockerfile                         # shared by the api and worker compose services
 ├── migrations/
 │   ├── env.py                         # reads the URL from settings unless given one
-│   └── versions/                      # 0001 the tables, 0002 the enum CHECK constraints
+│   └── versions/                      # 0001 the tables, 0002 enum CHECKs, 0003 matches
 ├── src/pickleball_api/
 │   ├── config.py                      # typed settings, and the extension allowlist
 │   ├── db.py                          # engine, session factory, request/worker sessions
 │   ├── dependencies.py                # what routes ask for: settings, session, storage, queue
 │   ├── errors.py                      # job error codes and their user-safe messages
-│   ├── jobs.py                        # the job state machine and the read queries
+│   ├── jobs.py                        # the job state machine, match status sync, read queries
 │   ├── main.py                        # create_app(): middleware, routers, error handlers
-│   ├── models.py                      # SQLAlchemy tables: Video, AnalysisJob
+│   ├── models.py                      # SQLAlchemy tables: Match, Video, AnalysisJob
 │   ├── queue.py                       # JobQueue interface, RQ and recording implementations
 │   ├── schemas.py                     # Pydantic response models
 │   ├── limits.py                      # refuses an oversized body before it is read
 │   ├── storage.py                     # Storage interface, local filesystem implementation
 │   ├── testing.py                     # fixtures both test suites share
-│   ├── uploads.py                     # filename hygiene, allowlist, format sniffing
-│   ├── routers/{health,videos,jobs}.py
+│   ├── uploads.py                     # filename hygiene, default match name, allowlist, sniffing
+│   ├── routers/{health,matches,jobs}.py
 │   └── __main__.py                    # `pbapi`
 └── tests/
 
@@ -74,14 +75,49 @@ by importing the function, so the edge really does point one way.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/videos` | Multipart upload. Creates a `Video` and a queued `AnalysisJob`. `201` |
-| `GET` | `/api/videos` | Videos newest first, each with its latest job. `limit`, `offset` |
-| `GET` | `/api/videos/{video_id}` | One video and every job for it. `404` if unknown |
-| `GET` | `/api/jobs/{job_id}` | Status, stage, progress, timestamps, failure code. `404` if unknown |
+| `POST` | `/api/matches` | Multipart upload (`file`). Creates a `Match`, its `Video` and a queued `AnalysisJob`. `201` |
+| `GET` | `/api/matches` | Matches newest first, each with its video and latest job. `limit`, `offset` |
+| `GET` | `/api/matches/{match_id}` | One match, its video, its latest job and every job attempt. `404` if unknown |
+| `GET` | `/api/jobs/{job_id}` | Status, stage, progress, timestamps, failure code, `match_id`. `404` if unknown |
 | `GET` | `/health` | Liveness. Touches no dependency |
 | `GET` | `/ready` | Readiness. Checks the database and Redis; `503` if either is down |
 
 Errors all have the same shape: `{"error_code": "...", "detail": "..."}`.
+
+The Phase 1 `/api/videos` endpoints were **removed**, not aliased: a video is
+now something a match owns, and two collections describing the same uploads
+would drift apart. They answer `404`, which a test pins. The API version in the
+OpenAPI document moved to `0.2.0` for the break.
+
+### Response shapes
+
+`MatchDetail` (from `POST /api/matches` and `GET /api/matches/{id}`):
+
+```json
+{
+  "id": "…uuid…",
+  "name": "Sunday doubles",
+  "recorded_at": null,
+  "status": "calibration_required",
+  "created_at": "2026-09-24T22:10:12.9Z",
+  "video": {
+    "id": "…uuid…",
+    "original_filename": "Sunday  doubles.mp4",
+    "content_type": "video/mp4",
+    "byte_size": 4032,
+    "created_at": "2026-09-24T22:10:12.9Z"
+  },
+  "latest_job": { "id": "…", "match_id": "…", "status": "ready", "stage": "metadata_ready", "…": "…" },
+  "jobs": [ "…every attempt, oldest first…" ]
+}
+```
+
+`MatchSummary` (each item of `GET /api/matches`) is the same without `jobs`.
+`video` is nullable in the schema because the database permits a match without
+one, but the upload path never produces it. The calibration will be added to
+`MatchDetail` when it exists; there is no placeholder field for it now.
+`storage_key` appears in no response, and a test checks the OpenAPI document
+for it.
 
 Upload rejections: `415` for an extension outside the allowlist or bytes that
 are not an ISO base-media file, `413` past the size limit, `507` when the disk
@@ -89,34 +125,63 @@ has no room, `503` when the job cannot be queued.
 
 ## Data Model
 
-Two tables. `videos`:
+Three tables. `matches` is the parent:
 
 | Column | Notes |
 |---|---|
 | `id` | UUID. Public, so it is random rather than sequential |
+| `name` | Defaults to the upload's filename without its extension, whitespace collapsed; `Untitled match` if nothing is left |
+| `recorded_at` | When the game was played. Nullable, and nothing sets it yet |
+| `status` | `uploaded`, `processing`, `calibration_required`, `court_ready`, `failed` |
+| `created_at` | `timestamptz`, set in Python |
+
+`videos`, one per match:
+
+| Column | Notes |
+|---|---|
+| `id` | UUID. Returned by the API, but no endpoint takes it |
+| `match_id` | FK to `matches`, `NOT NULL`, `UNIQUE`, `ON DELETE CASCADE` |
 | `original_filename` | Display only; never used to build a path |
 | `storage_key` | Generated, unique, never returned by the API |
 | `content_type` | Derived from the extension allowlist, not from the client |
 | `byte_size` | `BIGINT`; a match exceeds `INT4` |
 | `created_at` | `timestamptz`, set in Python |
 
-`analysis_jobs`: `id`, `video_id` (FK, `ON DELETE CASCADE`), `status`, `stage`,
+`analysis_jobs`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `status`, `stage`,
 `progress` (0.0-1.0, with a CHECK), `error_code`, `error_message`, `created_at`,
-`started_at`, `finished_at`.
+`started_at`, `finished_at`. Indexed on `(match_id, created_at)`, which serves
+both "every job for this match" and "its latest job". The latest job is the
+newest `created_at`, ties broken by `id`.
 
 `status` and `stage` are stored as `VARCHAR` plus a CHECK constraint (added in
 migration `0002`) rather than native PostgreSQL enums, so that adding a member
 does not need a type migration and so the same migration runs on the SQLite
 database the tests use.
 
+`matches.status` follows the same pattern, with its CHECK created by `0003`.
+
 ### Relationship to `DATA_MODEL.md`
 
-`DATA_MODEL.md` describes `Match` owning a `VideoAsset` and a `ProcessingJob`.
-`Video` here is that `VideoAsset` minus the decoded metadata (which needs the
-decoder the placeholder does not run), and `AnalysisJob` is that
-`ProcessingJob`. `Match` is deliberately absent: it exists to own calibrations,
-players and rallies, none of which exist yet, and an entity with one field and
-no children is harder to review than the migration that adds it later.
+`DATA_MODEL.md` describes `Match` owning a `VideoAsset` and a `ProcessingJob`,
+and that is now the shape here. `Video` is that `VideoAsset` minus the decoded
+metadata (which needs the decoder the placeholder does not run), and
+`AnalysisJob` is that `ProcessingJob`. `Match` has no `user_id` because there
+are no users.
+
+### Match Status
+
+A job's transition drives its match, in the same transaction, and nowhere else
+does (`pickleball_api.jobs.transition`):
+
+| Job moves to | Match becomes |
+|---|---|
+| `queued` (a requeue after failure) | `uploaded` |
+| `running` | `processing` |
+| `ready` | `calibration_required` — unless it is already `court_ready` |
+| `failed` | `failed` |
+
+A new upload starts at `uploaded`. `court_ready` is reserved for the
+calibration checkpoint; nothing sets it yet. There is no `ready`, on purpose.
 
 ### Job Status
 
@@ -143,8 +208,8 @@ The order is the point:
 1. Validate the filename, extension, and the first bytes.
 2. Write the file under a **generated** key (`<32 hex chars>.<ext>`), streaming
    with a running byte count.
-3. Insert both rows in one short transaction and commit. If that fails, the
-   stored file is deleted.
+3. Insert the match, its video and its job in one short transaction and
+   commit. If that fails, the stored file is deleted.
 4. Only then enqueue.
 
 Step 4 after step 3 matters: RQ pushes to Redis immediately, and a worker
@@ -157,9 +222,10 @@ equally bad: an orphaned file is invisible and reclaimable, whereas a row
 pointing at a file that does not exist is something every later endpoint has to
 defend against.
 
-If the queue is unreachable the rows are kept -- the upload really did happen --
-and the job is marked `failed` with `enqueue_failed` rather than left claiming a
-worker has it. The response is `503`.
+If the queue is unreachable the rows and the file are kept -- the upload really
+did happen -- and the job is marked `failed` with `enqueue_failed`, which fails
+the match with it, rather than being left claiming a worker has it. The
+response is `503` with a fixed sentence; no Redis URL or path reaches it.
 
 ## Storage
 
@@ -179,8 +245,10 @@ files are `0600`.
 ## The Worker
 
 `pbworker` runs an RQ worker against the configured queue. The task takes a job
-id and nothing else: everything else is read from PostgreSQL, so the queue is
-not a channel through which paths or configuration can be injected.
+id and nothing else: everything else is read from PostgreSQL (job -> match ->
+video), so the queue is not a channel through which paths or configuration can
+be injected. A job whose match has no video is failed with
+`missing_video_file` during the claim, without ever reaching `running`.
 
 Three separate transactions -- claim, each progress report, and the terminal
 transition -- so that a status the API can see is written as soon as it is true,
@@ -234,8 +302,31 @@ uv run alembic -c apps/api/alembic.ini current
 uv run alembic -c apps/api/alembic.ini revision --autogenerate -m "what changed"
 ```
 
-Alembic does not autogenerate CHECK constraints, so a change to `JobStatus` or
-`JobStage` needs its migration written by hand; `0002` is the pattern.
+Alembic does not autogenerate CHECK constraints, so a change to `JobStatus`,
+`JobStage` or `MatchStatus` needs its migration written by hand; `0002` is the
+pattern.
+
+### Migration 0003: introducing `matches`
+
+`0003_match_ownership` preserves every Phase 1 row. Each existing video becomes
+a match of its own, **reusing the video's id** (so a saved `/videos/<id>` link
+can be redirected to `/matches/<id>`), named from its filename, with
+`created_at` copied from the video and status derived from its latest job
+(`queued -> uploaded`, `running -> processing`, `ready -> calibration_required`,
+`failed -> failed`; no job -> `uploaded`). Every job moves from `video_id` to
+that match's id. Then `videos.match_id` becomes `NOT NULL` and `UNIQUE`, and
+`analysis_jobs.video_id` is dropped.
+
+The downgrade restores `analysis_jobs.video_id` from each match's video and
+drops `matches`. Match names and statuses have no Phase 1 column and are lost.
+A job whose match has no video cannot be represented before 0003, so the
+downgrade refuses with an error rather than deleting it.
+
+On SQLite, `batch_alter_table` rebuilds a table by dropping the original, and
+with foreign keys on that drop fires `ON DELETE CASCADE` on anything still
+referencing it. The migration orders its steps so a table is only rebuilt when
+nothing points at it; `test_migration_0003.py` would catch a regression by
+counting rows on both sides.
 
 `env.py` takes the URL from the application settings unless one is already
 configured, so the migrations always target the same database the API does, and
@@ -281,7 +372,10 @@ covers the real RQ adapter against `fakeredis`.
 
 The integration tests apply the migrations to a throwaway PostgreSQL database,
 compare the result against the models (catching a model edited without a new
-migration), and roll it back again.
+migration), and roll it back again. They also seed Phase 1 rows at revision
+0002 and take them up through 0003, back down and up again, checking every row
+on the way; `test_migration_0003.py` does the same on SQLite in the default
+suite.
 
 ## Troubleshooting
 
@@ -296,7 +390,7 @@ else. Both log the absolute path they resolved at startup; compare them. This
 also happens when a video is uploaded through the host API and a containerised
 worker looks for it, or vice versa — the two paths do not share storage.
 
-**`relation "videos" does not exist`, or every API call 500s.** The migrations
+**`relation "matches" does not exist`, or every API call 500s.** The migrations
 have not been applied: `uv run alembic -c apps/api/alembic.ini upgrade head`.
 Nothing creates tables at startup on purpose. In the container path the
 `migrate` service does this, so check `docker compose logs migrate`.
@@ -338,13 +432,10 @@ logged with their traceback and answered with one sentence.
 
 Phase 1 is complete; everything below is later-phase work.
 
-**Prerequisites for Phase 2 (court calibration).** None of these are gaps in
-Phase 1 — they are the groundwork calibration needs, and Phase 2 should build
-them before the calibration UI itself:
+**Remaining prerequisites for Phase 2 (court calibration).** The `Match`
+ownership model is done (checkpoint 1). Still to build before the calibration
+UI itself:
 
-- A `Match` entity, so a video belongs to something that `CourtCalibration`,
-  `Player` and `Rally` can hang off. `DATA_MODEL.md` describes it;
-  `videos.match_id` is the migration that introduces it.
 - Real video metadata extraction — fps, dimensions, duration, frame count,
   rotation — via `pickleball_ml.video.reader.read_metadata`, replacing
   `PlaceholderProcessor` behind the existing `VideoProcessor` interface. The
@@ -361,8 +452,10 @@ Known gaps in what is here:
   visible, but there is no retry endpoint and no sweeper, so the
   `failed -> queued` transition the state machine allows is unreachable over
   HTTP.
-- **No authentication or per-user authorization.** Every video is visible to
+- **No authentication or per-user authorization.** Every match is visible to
   anyone who can reach the port.
+- **Nothing edits a match.** `name` and `recorded_at` are set at upload and
+  there is no endpoint to change them.
 - **No deletion endpoint**, which `ARCHITECTURE.md` requires for privacy.
 - **The size limit bounds what is stored more tightly than what is buffered.**
   An upload declaring an oversized `Content-Length` is refused by middleware

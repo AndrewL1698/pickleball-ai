@@ -13,7 +13,7 @@
  */
 
 import { beforeAll, expect, it } from "vitest";
-import { API_BASE_URL, uploadVideo } from "@/lib/api";
+import { API_BASE_URL, createMatch } from "@/lib/api";
 
 /** A genuine ISO base-media header, which is what the API's sniff looks for. */
 function realVideoFile(name = "live-check.mp4"): File {
@@ -32,15 +32,18 @@ beforeAll(async () => {
   }
 });
 
-it("uploads a video and gets back a video with a queued job", async () => {
-  const created = await uploadVideo(realVideoFile());
+it("uploads a video and gets back a match with its video and a queued job", async () => {
+  const created = await createMatch(realVideoFile());
 
   expect(created.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-/);
-  expect(created.original_filename).toBe("live-check.mp4");
-  expect(created.content_type).toBe("video/mp4");
-  expect(created.byte_size).toBeGreaterThan(0);
+  expect(created.name).toBe("live-check");
+  expect(created.status).toBe("uploaded");
+  expect(created.video?.original_filename).toBe("live-check.mp4");
+  expect(created.video?.content_type).toBe("video/mp4");
+  expect(created.video?.byte_size).toBeGreaterThan(0);
   expect(created.jobs).toHaveLength(1);
   expect(created.latest_job?.status).toBe("queued");
+  expect(created.latest_job?.match_id).toBe(created.id);
   // The key the file is stored under must never reach the browser.
   expect(JSON.stringify(created)).not.toContain("storage_key");
 });
@@ -49,12 +52,12 @@ it("is rejected by the server when the bytes are not a video", async () => {
   const notAVideo = new File([new TextEncoder().encode("plain text")], "fake.mp4", {
     type: "video/mp4",
   });
-  await expect(uploadVideo(notAVideo)).rejects.toMatchObject({
+  await expect(createMatch(notAVideo)).rejects.toMatchObject({
     status: 415,
     code: "unsupported_file_type",
   });
 });
 
 it("is rejected by the server when the extension is not allowed", async () => {
-  await expect(uploadVideo(realVideoFile("notes.txt"))).rejects.toMatchObject({ status: 415 });
+  await expect(createMatch(realVideoFile("notes.txt"))).rejects.toMatchObject({ status: 415 });
 });

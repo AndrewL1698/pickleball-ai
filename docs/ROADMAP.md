@@ -166,7 +166,8 @@ Carried into later phases:
 - Real video metadata extraction in the worker
   (`pickleball_ml.video.reader.read_metadata`), replacing the placeholder.
 - A `Match` entity, so calibrations, players and rallies have an owner. Until
-  then the UI deliberately says "Videos", never "Matches".
+  then the UI deliberately says "Videos", never "Matches". (Done in Phase 2
+  checkpoint 1.)
 - Serving uploaded video back to the browser for playback, which needs its own
   decisions about origin and content headers.
 - No reaper for a job whose worker was killed, and no retry endpoint, so the
@@ -190,6 +191,21 @@ without them (see `docs/BACKEND.md`):
   (`pickleball_ml.video.reader.read_metadata`), replacing the placeholder
 - secure playback of the uploaded video, so a landmark can be clicked on a
   frame — served from an origin that is not the app's own
+
+Status (2026-09-24): checkpoint 1 done - the `Match` ownership model. A
+`matches` table (name, `recorded_at`, status, `created_at`) owns one `Video`
+(`videos.match_id`, unique) and every `AnalysisJob` (`analysis_jobs.match_id`,
+replacing `video_id`). Migration `0003_match_ownership` carries Phase 1 rows
+over, one match per video with the video's id, and has a tested downgrade on
+SQLite and PostgreSQL. `Match.status` uses an explicit vocabulary —
+`uploaded`, `processing`, `calibration_required`, `court_ready`, `failed` —
+with no generic "ready"; a finished placeholder job leaves a match
+`calibration_required`, and `court_ready` is reserved for the calibration
+checkpoint. The API is match-oriented (`POST/GET /api/matches`,
+`GET /api/matches/{id}`; `/api/videos` removed), and the web app moved to
+`/matches` and `/matches/:id`, with `/videos` paths redirecting.
+
+Next: real metadata extraction in the worker, then secure playback.
 
 Build:
 

@@ -10,26 +10,34 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { VideoStatusView } from "@/components/VideoStatusView";
+import { MatchDetailView } from "@/components/MatchDetailView";
 import {
   JOB_FAILED,
   JOB_QUEUED,
   JOB_READY,
   JOB_RUNNING,
-  VIDEO_DETAIL,
+  MATCH_DETAIL,
   jsonResponse,
   wait,
 } from "./fixtures";
-import type { Job } from "@/lib/types";
+import type { Job, MatchStatus } from "@/lib/types";
 
 // Async factory: `vi.mock` is hoisted above the imports, so the stub has to
 // be pulled in when the factory runs rather than at module scope.
 vi.mock("next/link", async () => (await import("./fixtures")).nextLinkMock());
 
-const VIDEO_ID = VIDEO_DETAIL.id;
+const MATCH_ID = MATCH_DETAIL.id;
+
+/** The match status the server derives from each job status. */
+const MATCH_STATUS_FOR: Record<Job["status"], MatchStatus> = {
+  queued: "uploaded",
+  running: "processing",
+  ready: "calibration_required",
+  failed: "failed",
+};
 
 function withJob(job: Job) {
-  return { ...VIDEO_DETAIL, latest_job: job, jobs: [job] };
+  return { ...MATCH_DETAIL, status: MATCH_STATUS_FOR[job.status], latest_job: job, jobs: [job] };
 }
 
 /** Answers each poll with the next job state, repeating the last one. */
@@ -47,7 +55,7 @@ function respondWith(sequence: Job[]) {
 describe("status lifecycle", () => {
   it("follows a job from queued through running to ready, then stops polling", async () => {
     const fetchMock = respondWith([JOB_QUEUED, JOB_RUNNING, JOB_READY]);
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     expect(await screen.findByText(/waiting to start/i)).toBeInTheDocument();
     expect(await screen.findByText(/checking the file/i)).toBeInTheDocument();
@@ -67,14 +75,14 @@ describe("status lifecycle", () => {
     // The placeholder processor finishes in milliseconds, so `running` is
     // frequently never observed between two polls.
     respondWith([JOB_QUEUED, JOB_READY]);
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     expect(await screen.findByRole("heading", { name: /file check complete/i })).toBeInTheDocument();
   }, 10000);
 
   it("does not poll at all when the job is already finished", async () => {
     const fetchMock = respondWith([JOB_READY]);
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     await screen.findByRole("heading", { name: /file check complete/i });
     await wait(150);
@@ -83,7 +91,7 @@ describe("status lifecycle", () => {
 
   it("shows a failed job's sanitized message and code", async () => {
     respondWith([JOB_FAILED]);
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     expect(await screen.findByRole("heading", { name: /processing failed/i })).toBeInTheDocument();
     expect(screen.getByText("The video could not be read.")).toBeInTheDocument();
@@ -95,24 +103,26 @@ describe("status lifecycle", () => {
 describe("headings and announcements in every state", () => {
   it("has a heading while loading, so the page is never heading-less", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
     expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
   });
 
-  it("has a heading when the video cannot be loaded", async () => {
+  it("has a heading when the match cannot be loaded", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => jsonResponse({ error_code: "not_found", detail: "No such video." }, 404)),
+      vi.fn(async () => jsonResponse({ error_code: "not_found", detail: "No such match." }, 404)),
     );
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
     await screen.findByRole("alert");
     expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
   });
 
-  it("names the video once it is loaded", async () => {
+  it("names the match once it is loaded", async () => {
     respondWith([JOB_READY]);
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
-    expect(await screen.findByRole("heading", { level: 1, name: "demo.mp4" })).toBeInTheDocument();
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    expect(await screen.findByRole("heading", { level: 1, name: "demo" })).toBeInTheDocument();
+    // The original filename is shown as metadata, not as the title.
+    expect(screen.getByText("demo.mp4")).toBeInTheDocument();
   });
 
   it("treats an unparseable id as not found rather than a load failure", async () => {
@@ -122,15 +132,15 @@ describe("headings and announcements in every state", () => {
         jsonResponse({ error_code: "invalid_request", detail: "The request was not valid." }, 422),
       ),
     );
-    render(<VideoStatusView videoId="not-a-uuid" pollIntervalMs={20} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent(/could not find that video/i);
+    render(<MatchDetailView matchId="not-a-uuid" pollIntervalMs={20} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not find that match/i);
   });
 });
 
 describe("honesty about the placeholder", () => {
   it("never claims the match was analysed", async () => {
     respondWith([JOB_READY]);
-    const { container } = render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    const { container } = render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
     await screen.findByRole("heading", { name: /file check complete/i });
 
     expect(screen.getByText(/does not analyse video yet/i)).toBeInTheDocument();
@@ -139,9 +149,32 @@ describe("honesty about the placeholder", () => {
     expect(container.textContent).not.toMatch(/view results/i);
   });
 
+  it("says the match needs calibration, and that calibration is not available", async () => {
+    respondWith([JOB_READY]);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    await screen.findByRole("heading", { name: /file check complete/i });
+    expect(screen.getByTestId("match-status-badge")).toHaveTextContent(/needs calibration/i);
+    expect(screen.getByText(/calibration is not available in this build/i)).toBeInTheDocument();
+  });
+
+  it("shows a failed match alongside its failed job", async () => {
+    respondWith([JOB_FAILED]);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    await screen.findByRole("heading", { name: /processing failed/i });
+    expect(screen.getByTestId("match-status-badge")).toHaveTextContent(/failed/i);
+  });
+
+  it("follows the match status as its job moves", async () => {
+    respondWith([JOB_QUEUED, JOB_RUNNING, JOB_READY]);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("match-status-badge")).toHaveTextContent(/needs calibration/i),
+    );
+  }, 10000);
+
   it("says metadata is missing rather than showing empty fields", async () => {
     respondWith([JOB_READY]);
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
     await screen.findByRole("heading", { name: /file check complete/i });
     expect(
       screen.getByText(/duration, resolution and frame rate are not extracted yet/i),
@@ -155,7 +188,7 @@ describe("announcements", () => {
     // is inserted and announces later changes, so the region has to exist
     // before there is anything to say, and it has to start empty.
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
-    const { container } = render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    const { container } = render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
     const live = container.querySelector('p[role="status"].sr-only');
     expect(live).toBeInTheDocument();
     expect(live).toHaveTextContent("");
@@ -163,7 +196,7 @@ describe("announcements", () => {
 
   it("announces the status in words, without anything that ticks", async () => {
     respondWith([JOB_QUEUED, JOB_READY]);
-    const { container } = render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    const { container } = render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     await waitFor(() => {
       const live = container.querySelector('p[role="status"].sr-only');
@@ -186,7 +219,7 @@ describe("failures while polling", () => {
         return jsonResponse({ error_code: "internal_error", detail: "Server blew up." }, 500);
       }),
     );
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     await screen.findByText(/waiting to start/i);
     expect(await screen.findByText(/could not check for updates/i)).toBeInTheDocument();
@@ -195,14 +228,18 @@ describe("failures while polling", () => {
     expect(screen.queryByRole("heading", { name: /processing failed/i })).not.toBeInTheDocument();
   }, 10000);
 
-  it("stops and reports when the video does not exist", async () => {
+  it("stops and reports when the match does not exist", async () => {
     const fetchMock = vi.fn(async () =>
-      jsonResponse({ error_code: "not_found", detail: "No such video." }, 404),
+      jsonResponse({ error_code: "not_found", detail: "No such match." }, 404),
     );
     vi.stubGlobal("fetch", fetchMock);
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/could not find that video/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not find that match/i);
+    expect(screen.getByRole("link", { name: /back to matches/i })).toHaveAttribute(
+      "href",
+      "/matches",
+    );
     // A 404 will not fix itself, so it must not be retried forever.
     await wait(150);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -213,7 +250,7 @@ describe("manual refresh", () => {
   it("fetches again when asked", async () => {
     const fetchMock = respondWith([JOB_READY]);
     const user = userEvent.setup();
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     await screen.findByRole("heading", { name: /file check complete/i });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -235,7 +272,7 @@ describe("manual refresh", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     await screen.findByRole("heading", { name: /file check complete/i });
     await user.click(screen.getByRole("button", { name: /refresh/i }));
@@ -243,7 +280,7 @@ describe("manual refresh", () => {
     await waitFor(() => expect(call).toBeGreaterThan(1));
     expect(screen.getByRole("heading", { name: /file check complete/i })).toBeInTheDocument();
     expect(screen.getByTestId("status-badge")).toHaveTextContent(/ready/i);
-    expect(screen.queryByText(/could not load this video/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/could not load this match/i)).not.toBeInTheDocument();
   }, 10000);
 
   it("marks the button busy while the refresh is in flight", async () => {
@@ -260,7 +297,7 @@ describe("manual refresh", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     await screen.findByRole("heading", { name: /file check complete/i });
     const button = screen.getByRole("button", { name: /refresh/i });
@@ -276,7 +313,7 @@ describe("manual refresh", () => {
   it("does not disturb the button during background polling", async () => {
     // A poll nobody asked for must not flicker the control or announce itself.
     respondWith([JOB_QUEUED]);
-    render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     await screen.findByText(/waiting to start/i);
     const button = screen.getByRole("button", { name: /refresh/i });
@@ -303,7 +340,7 @@ describe("cleanup", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const { unmount } = render(<VideoStatusView videoId={VIDEO_ID} pollIntervalMs={20} />);
+    const { unmount } = render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
     await screen.findByText(/waiting to start/i);
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(1));
 

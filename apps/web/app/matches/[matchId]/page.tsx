@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { VideoStatusView } from "@/components/VideoStatusView";
+import { MatchDetailView } from "@/components/MatchDetailView";
 
 export const metadata: Metadata = {
-  title: "Processing job",
+  title: "Match",
 };
 
 /**
@@ -10,7 +10,7 @@ export const metadata: Metadata = {
  * removed, not just deprecated. `PageProps` is a generated global, so it needs
  * no import.
  */
-export default async function VideoPage(props: PageProps<"/videos/[videoId]">) {
-  const { videoId } = await props.params;
-  return <VideoStatusView videoId={videoId} />;
+export default async function MatchPage(props: PageProps<"/matches/[matchId]">) {
+  const { matchId } = await props.params;
+  return <MatchDetailView matchId={matchId} />;
 }

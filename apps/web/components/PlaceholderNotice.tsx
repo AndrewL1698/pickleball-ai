@@ -13,8 +13,8 @@ export function PlaceholderNotice() {
     <Notice tone="info" title="This build does not analyse video yet.">
       <p>
         Processing currently verifies the uploaded file and records a checksum. Court
-        calibration, player tracking, ball tracking, rally detection and statistics are not
-        implemented.
+        calibration is the next step for every match, but it is not available here yet, and
+        player tracking, ball tracking, rally detection and statistics are not implemented.
       </p>
     </Notice>
   );

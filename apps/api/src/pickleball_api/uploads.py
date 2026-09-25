@@ -24,6 +24,10 @@ from pickleball_api.storage import CHUNK_BYTES
 #: Longest original filename kept, in characters. The column is 255.
 MAX_FILENAME_CHARS = 200
 
+#: Longest default match name, in characters. The column is 200.
+MAX_MATCH_NAME_CHARS = 200
+UNNAMED_MATCH = "Untitled match"
+
 #: ISO base media files (mp4/m4v/mov) carry an `ftyp` box at offset 4.
 FTYP_OFFSET = 4
 FTYP_MARKER = b"ftyp"
@@ -59,6 +63,18 @@ def clean_filename(filename: str | None) -> str:
     # turn a legitimate long filename into an unsupported file type.
     suffix = PurePosixPath(name).suffix[: MAX_FILENAME_CHARS // 2]
     return name[: MAX_FILENAME_CHARS - len(suffix)] + suffix
+
+
+def default_match_name(filename: str) -> str:
+    """A match name to start with, taken from an already-cleaned filename.
+
+    The extension is dropped and runs of whitespace collapsed, so
+    `"Sunday  doubles.mov"` becomes `"Sunday doubles"`. It is display text
+    only, like the filename it came from. Migration 0003 carries a frozen copy
+    of this rule for the matches it backfilled.
+    """
+    name = " ".join(PurePosixPath(filename).stem.split())[:MAX_MATCH_NAME_CHARS].strip()
+    return name or UNNAMED_MATCH
 
 
 def video_extension(filename: str, allowed: tuple[str, ...]) -> str:

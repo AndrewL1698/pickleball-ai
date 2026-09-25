@@ -82,10 +82,18 @@ def _claim(job_id: UUID) -> VideoRef | None:
         if job.status is not JobStatus.QUEUED:
             logger.info("job %s is already %s; not running it again", job_id, job.status)
             return None
+        video = job.match.video
+        if video is None:
+            # A match with nothing to process. Failing it here, inside the
+            # claim, means it never sits in `running` pretending otherwise.
+            logger.warning("job %s: match %s has no video", job_id, job.match_id)
+            transition(job, JobStatus.FAILED, error_code=JobErrorCode.MISSING_VIDEO_FILE)
+            return None
+        # Moves the match to `processing` in the same transaction.
         transition(job, JobStatus.RUNNING, stage=JobStage.INGESTED, progress=0.0)
-        video = job.video
         return VideoRef(
             id=video.id,
+            match_id=job.match_id,
             storage_key=video.storage_key,
             original_filename=video.original_filename,
             content_type=video.content_type,
@@ -125,7 +133,10 @@ def _finish(
     stage: JobStage | None = None,
     error_code: JobErrorCode | None = None,
 ) -> None:
-    """Record the outcome, unless the job is no longer ours to finish."""
+    """Record the outcome, unless the job is no longer ours to finish.
+
+    The match's status moves with the job, in the same commit.
+    """
     with session_scope() as session:
         job = session.get(AnalysisJob, job_id, with_for_update=True)
         if job is None:

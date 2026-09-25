@@ -11,7 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pickleball_api.models import AnalysisJob, JobStage, JobStatus, Video
+from pickleball_api.models import AnalysisJob, JobStage, JobStatus, Match, MatchStatus
 
 
 class JobRead(BaseModel):
@@ -20,7 +20,7 @@ class JobRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    video_id: UUID
+    match_id: UUID
     status: JobStatus
     stage: JobStage
     progress: float = Field(ge=0.0, le=1.0)
@@ -35,8 +35,12 @@ class JobRead(BaseModel):
         return cls.model_validate(job)
 
 
-class VideoSummary(BaseModel):
-    """A video in a list, with the status of its most recent job."""
+class VideoRead(BaseModel):
+    """The stored video behind a match, minus where it is stored.
+
+    Only what the upload itself established. Decoded metadata -- duration,
+    dimensions, frame rate -- arrives with real metadata extraction.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -45,25 +49,41 @@ class VideoSummary(BaseModel):
     content_type: str
     byte_size: int
     created_at: datetime
+
+
+class MatchSummary(BaseModel):
+    """A match in a list: its status, its video, and its most recent job."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    recorded_at: datetime | None
+    status: MatchStatus
+    created_at: datetime
+    #: Null only for a match whose video row is missing, which the upload
+    #: path never produces; the schema says so rather than inventing one.
+    video: VideoRead | None
     latest_job: JobRead | None
 
     @classmethod
-    def of(cls, video: Video) -> "VideoSummary":
-        return cls.model_validate(video)
+    def of(cls, match: Match) -> "MatchSummary":
+        return cls.model_validate(match)
 
 
-class VideoDetail(VideoSummary):
-    """One video and every attempt made at processing it."""
+class MatchDetail(MatchSummary):
+    """One match and every attempt made at processing it, oldest first."""
 
     jobs: list[JobRead]
 
     @classmethod
-    def of(cls, video: Video) -> "VideoDetail":
-        return cls.model_validate(video)
+    def of(cls, match: Match) -> "MatchDetail":
+        return cls.model_validate(match)
 
 
-class VideoList(BaseModel):
-    videos: list[VideoSummary]
+class MatchList(BaseModel):
+    matches: list[MatchSummary]
+    #: The length of this page, not a total across all matches.
     count: int
 
 

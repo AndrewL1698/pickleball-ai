@@ -31,6 +31,7 @@ class VideoRef:
     """Everything a processor is told about the video it is working on."""
 
     id: UUID
+    match_id: UUID
     storage_key: str
     original_filename: str
     content_type: str

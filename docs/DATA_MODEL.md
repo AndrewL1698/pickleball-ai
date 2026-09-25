@@ -2,17 +2,19 @@
 
 This document gives a conceptual schema. Exact implementation may evolve.
 
-Implementation status: Phase 1 checkpoint 1 ships two of these tables, under
-shorter names, because the entities they would hang off do not exist yet:
+Implementation status (Phase 2 checkpoint 1): three of these tables exist.
 
 | Here | In the database today |
 |---|---|
-| `VideoAsset` | `videos`, minus the decoded metadata (no decoder runs yet) and with no `match_id` |
-| `ProcessingJob` | `analysis_jobs`, plus an `error_code` column |
-| `Match` | not yet; it arrives with the calibrations, players and rallies it exists to own |
+| `Match` | `matches`, without `user_id` (there are no users yet) |
+| `VideoAsset` | `videos`, with a unique `match_id`, minus the decoded metadata (no decoder runs yet) |
+| `ProcessingJob` | `analysis_jobs`, owned by `match_id`, plus an `error_code` column |
 
-The job status vocabulary below is the implemented one (`ready`, not
-`succeeded`, so that it matches `Match.status`). See `BACKEND.md`.
+Ownership points Match -> VideoAsset and Match -> ProcessingJob, so every later
+table (`CourtCalibration`, `Player`, `Rally`, ...) has the same stable parent.
+Deleting a match cascades to its video and jobs, in the database
+(`ON DELETE CASCADE`) as well as in the ORM. The status vocabularies below are
+the implemented ones. See `BACKEND.md`.
 
 Conventions:
 
@@ -32,22 +34,37 @@ created_at
 
 ```text
 id
-user_id
-name
-recorded_at
-status               # overall lifecycle: uploaded / processing / ready / failed
+user_id              # not yet: no User table exists
+name                 # defaults to the upload's filename without its extension
+recorded_at          # when the game was played, if known; not the upload time
+status               # uploaded / processing / calibration_required / court_ready / failed
 created_at
 ```
 
 `Match.status` is the user-facing summary. Per-stage pipeline progress lives in `ProcessingJob`.
 
+There is deliberately no generic `ready`: it would read as "the match has been
+analysed". Each status names what has happened or what must happen next:
+
+| Status | Meaning | Set by |
+|---|---|---|
+| `uploaded` | Stored; no processing attempt is running | Upload; a failed job requeued |
+| `processing` | A job is running | The job moving to `running` |
+| `calibration_required` | Processing finished; the court must be calibrated next | The job reaching `ready` |
+| `court_ready` | A court calibration exists | Reserved for the calibration checkpoint |
+| `failed` | The latest attempt failed | The job moving to `failed` |
+
+A job only ever changes the match's status through
+`pickleball_api.jobs.transition`, so the two cannot disagree. A job finishing on
+an already calibrated match leaves it `court_ready`.
+
 ## VideoAsset
 
 ```text
 id
-match_id
+match_id             # unique: one video per match for the MVP
 storage_key
-filename
+filename             # `original_filename`: display metadata, never a path
 width
 height
 rotation_degrees     # phone videos often carry rotation metadata
@@ -66,7 +83,7 @@ Because phone video is often variable frame rate, derive timestamps from decoded
 id
 match_id
 stage                # INGESTED / METADATA_READY / COURT_READY / ...
-status               # queued / running / ready / failed
+status               # queued / running / ready / failed (ready = this job finished, not the match)
 progress
 model_run_id         # nullable; model details live in ModelRun
 error_code           # stable, machine-readable reason for a failure

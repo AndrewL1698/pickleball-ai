@@ -2,48 +2,49 @@
 
 import Link from "next/link";
 import { useCallback } from "react";
-import { getVideo } from "@/lib/api";
+import { getMatch } from "@/lib/api";
 import { formatBytes } from "@/lib/files";
 import { formatDuration, formatTimestamp } from "@/lib/format";
-import { STATUS_COPY, isFinished } from "@/lib/status";
-import type { VideoDetail } from "@/lib/types";
+import { MATCH_STATUS_COPY, STATUS_COPY, isFinished } from "@/lib/status";
+import type { MatchDetail } from "@/lib/types";
 import { usePolledResource } from "@/hooks/usePolledResource";
 import { Notice } from "./Notice";
 import { PlaceholderNotice } from "./PlaceholderNotice";
 import { RefreshButton } from "./RefreshButton";
 import { Spinner } from "./Spinner";
-import { StatusBadge } from "./StatusBadge";
+import { MatchStatusBadge, StatusBadge } from "./StatusBadge";
 
 /**
- * One video and the state of its job.
+ * One match: its status, its video, and the state of its processing job.
  *
- * It polls `GET /api/videos/{id}` rather than `GET /api/jobs/{id}` because that
- * one response carries the video and every job for it, so the page needs a
- * single request per tick and there is no jobs-list endpoint to miss.
+ * It polls `GET /api/matches/{id}` rather than `GET /api/jobs/{id}` because
+ * that one response carries the match, its video and every job for it, so the
+ * page needs a single request per tick and there is no jobs-list endpoint to
+ * miss.
  */
-export function VideoStatusView({
-  videoId,
+export function MatchDetailView({
+  matchId,
   pollIntervalMs = 2000,
 }: {
-  videoId: string;
+  matchId: string;
   /** Exposed so tests can drive the loop faster than a person would see. */
   pollIntervalMs?: number;
 }) {
   const fetcher = useCallback(
-    (signal: AbortSignal) => getVideo(videoId, signal),
-    [videoId],
+    (signal: AbortSignal) => getMatch(matchId, signal),
+    [matchId],
   );
 
-  // Keep going while the job could still change. A video with no job is never
+  // Keep going while the job could still change. A match with no job is never
   // going to grow one, so that stops too.
   const shouldContinue = useCallback(
-    (video: VideoDetail) =>
-      video.latest_job !== null && !isFinished(video.latest_job.status),
+    (match: MatchDetail) =>
+      match.latest_job !== null && !isFinished(match.latest_job.status),
     [],
   );
 
   const { data, error, staleError, isLoading, isRefreshing, isPolling, refresh } =
-    usePolledResource<VideoDetail>(fetcher, {
+    usePolledResource<MatchDetail>(fetcher, {
       intervalMs: pollIntervalMs,
       shouldContinue,
     });
@@ -51,7 +52,8 @@ export function VideoStatusView({
   const job = data?.latest_job ?? null;
   const copy = job ? STATUS_COPY[job.status] : null;
 
-  const title = data ? data.original_filename : "Processing job";
+  const title = data ? data.name : "Match";
+  const video = data?.video ?? null;
   const announcement = copy?.announcement ?? "";
 
   if (isLoading) {
@@ -59,7 +61,7 @@ export function VideoStatusView({
       <Shell title={title} announcement={announcement}>
         <p className="flex items-center gap-2 text-muted">
           <Spinner />
-          Loading job…
+          Loading match…
         </p>
       </Shell>
     );
@@ -73,7 +75,7 @@ export function VideoStatusView({
           <Notice
             tone="error"
             role="alert"
-            title={isMissing ? "We could not find that video." : "We could not load this video."}
+            title={isMissing ? "We could not find that match." : "We could not load this match."}
             code={error?.code}
           >
             <p>
@@ -83,10 +85,10 @@ export function VideoStatusView({
             </p>
           </Notice>
           <Link
-            href="/videos"
+            href="/matches"
             className="focus-ring inline-flex min-h-11 items-center rounded-lg border border-border-subtle px-4 font-medium"
           >
-            Back to videos
+            Back to matches
           </Link>
         </div>
       </Shell>
@@ -95,6 +97,18 @@ export function VideoStatusView({
 
   return (
     <Shell title={title} announcement={announcement}>
+      <section aria-labelledby="match-heading">
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 id="match-heading" className="text-lg font-semibold">
+            Match status
+          </h2>
+          <MatchStatusBadge status={data.status} />
+        </div>
+        <p className="mt-2 text-muted">{MATCH_STATUS_COPY[data.status].description}</p>
+      </section>
+
+      <PlaceholderNotice />
+
       <header>
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-semibold tracking-tight">
@@ -102,10 +116,8 @@ export function VideoStatusView({
           </h2>
           {job ? <StatusBadge status={job.status} /> : null}
         </div>
-        <p className="mt-2 text-muted">{copy?.description ?? "This video has no job."}</p>
+        <p className="mt-2 text-muted">{copy?.description ?? "This match has no job."}</p>
       </header>
-
-      <PlaceholderNotice />
 
       {job?.status === "failed" ? (
         <Notice tone="error" title="What went wrong" code={job.error_code}>
@@ -115,13 +127,23 @@ export function VideoStatusView({
 
       <section aria-labelledby="upload-heading">
         <h2 id="upload-heading" className="text-lg font-semibold">
-          Upload
+          Video
         </h2>
         <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Field label="File name" value={data.original_filename} />
-          <Field label="Size" value={formatBytes(data.byte_size)} />
-          <Field label="Type" value={data.content_type} />
-          <Field label="Uploaded" value={formatTimestamp(data.created_at)} />
+          {video ? (
+            <>
+              <Field label="File name" value={video.original_filename} />
+              <Field label="Size" value={formatBytes(video.byte_size)} />
+              <Field label="Type" value={video.content_type} />
+              <Field label="Uploaded" value={formatTimestamp(video.created_at)} />
+            </>
+          ) : (
+            <Field label="File" value="No video is attached to this match." />
+          )}
+          <Field
+            label="Recorded"
+            value={data.recorded_at ? formatTimestamp(data.recorded_at) : "Not set"}
+          />
           {job ? (
             <>
               <Field label="Job created" value={formatTimestamp(job.created_at)} />
@@ -192,7 +214,7 @@ export function VideoStatusView({
 /**
  * The frame every state renders inside.
  *
- * Module level, not declared inside `VideoStatusView`: a component defined in
+ * Module level, not declared inside `MatchDetailView`: a component defined in
  * a render body is a new type on every render, so React would remount this
  * subtree -- and destroy and re-insert the live region -- on every poll.
  */

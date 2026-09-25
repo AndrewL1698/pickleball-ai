@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 
 const LINKS = [
   { href: "/", label: "Upload" },
-  { href: "/videos", label: "Videos" },
+  { href: "/matches", label: "Matches" },
 ] as const;
 
 export function SiteHeader() {
@@ -20,7 +20,7 @@ export function SiteHeader() {
         <nav aria-label="Main">
           <ul className="flex gap-1">
             {LINKS.map(({ href, label }) => {
-              // `/videos/<id>` should still mark Videos as the current section.
+              // `/matches/<id>` should still mark Matches as the current section.
               const isCurrent =
                 href === "/" ? pathname === "/" : pathname.startsWith(href);
               return (

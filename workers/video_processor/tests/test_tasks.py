@@ -9,7 +9,7 @@ from sqlalchemy import Engine
 
 from pickleball_api import db
 from pickleball_api.errors import JobErrorCode, JobFailure
-from pickleball_api.models import AnalysisJob, JobStage, JobStatus, Video
+from pickleball_api.models import AnalysisJob, JobStage, JobStatus, Match, MatchStatus, Video
 from pickleball_api.storage import LocalFileStorage, Storage
 from pickleball_worker.processors import (
     PlaceholderProcessor,
@@ -55,6 +55,13 @@ def reload(job_id: uuid.UUID) -> AnalysisJob:
         return job
 
 
+def match_status(job_id: uuid.UUID) -> MatchStatus:
+    with db.session_scope() as session:
+        job = session.get(AnalysisJob, job_id)
+        assert job is not None
+        return job.match.status
+
+
 def test_a_successful_job_ends_ready_with_a_fingerprint(
     stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
 ) -> None:
@@ -78,7 +85,9 @@ def test_the_same_video_always_fingerprints_the_same(
     stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
 ) -> None:
     video, job = stored_video
-    ref = VideoRef(video.id, video.storage_key, "m.mp4", "video/mp4", video.byte_size)
+    ref = VideoRef(
+        video.id, video.match_id, video.storage_key, "m.mp4", "video/mp4", video.byte_size
+    )
     processor = PlaceholderProcessor()
     noop: ProgressReporter = lambda stage, progress: None  # noqa: E731
     first = processor.process(ref, storage, noop)
@@ -131,13 +140,14 @@ def test_a_truncated_file_fails_rather_than_reporting_success(
 
     key = new_storage_key(".mp4")
     storage.write(key, [b"only a few bytes"], max_bytes=100)
-    video = Video(
-        original_filename="m.mp4", storage_key=key, content_type="video/mp4",
+    match = Match(name="m")
+    Video(
+        match=match, original_filename="m.mp4", storage_key=key, content_type="video/mp4",
         byte_size=999_999,  # the row disagrees with the file
     )
-    job = AnalysisJob(video=video)
+    job = AnalysisJob(match=match)
     with db.session_scope() as session:
-        session.add_all([video, job])
+        session.add(match)
 
     run_analysis_job(str(job.id), storage=storage)
     assert reload(job.id).error_code == JobErrorCode.UNREADABLE_VIDEO.value
@@ -231,3 +241,78 @@ def test_processors_satisfy_the_interface(processor: object) -> None:
     from pickleball_worker.processors import VideoProcessor
 
     assert isinstance(processor, VideoProcessor)
+
+
+def test_a_successful_job_leaves_its_match_waiting_for_calibration(
+    stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
+) -> None:
+    """Not "ready": nothing about the match has been analysed, and the court
+    still has to be calibrated."""
+    _, job = stored_video
+    assert match_status(job.id) is MatchStatus.UPLOADED
+    run_analysis_job(str(job.id), storage=storage)
+    assert match_status(job.id) is MatchStatus.CALIBRATION_REQUIRED
+
+
+def test_the_match_is_processing_while_its_job_runs(
+    stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
+) -> None:
+    _, job = stored_video
+    seen: list[MatchStatus] = []
+
+    class WatchingProcessor:
+        name, version = "watching", "1"
+
+        def process(
+            self, video: VideoRef, s: Storage, report: ProgressReporter
+        ) -> dict[str, Any]:
+            seen.append(match_status(job.id))
+            assert video.match_id == job.match_id
+            return {}
+
+    run_analysis_job(str(job.id), processor=WatchingProcessor(), storage=storage)
+    assert seen == [MatchStatus.PROCESSING]
+
+
+def test_a_failed_job_fails_its_match(
+    stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
+) -> None:
+    _, job = stored_video
+    run_analysis_job(str(job.id), processor=FailingProcessor(), storage=storage)
+    assert match_status(job.id) is MatchStatus.FAILED
+
+
+def test_a_job_whose_match_has_no_video_fails_without_running(
+    engine: Engine, storage: LocalFileStorage
+) -> None:
+    match = Match(name="no video")
+    job = AnalysisJob(match=match)
+    with db.session_scope() as session:
+        session.add(match)
+
+    ran: list[bool] = []
+
+    class RecordingProcessor:
+        name, version = "recording", "1"
+
+        def process(
+            self, video: VideoRef, s: Storage, report: ProgressReporter
+        ) -> dict[str, Any]:
+            ran.append(True)
+            return {}
+
+    assert run_analysis_job(str(job.id), processor=RecordingProcessor(), storage=storage) is None
+    assert ran == []
+    failed = reload(job.id)
+    assert failed.status is JobStatus.FAILED
+    assert failed.error_code == JobErrorCode.MISSING_VIDEO_FILE.value
+    assert match_status(job.id) is MatchStatus.FAILED
+
+
+def test_rerunning_a_finished_job_does_not_move_its_match(
+    stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
+) -> None:
+    _, job = stored_video
+    run_analysis_job(str(job.id), storage=storage)
+    run_analysis_job(str(job.id), processor=FailingProcessor(), storage=storage)
+    assert match_status(job.id) is MatchStatus.CALIBRATION_REQUIRED
