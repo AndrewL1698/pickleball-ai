@@ -10,6 +10,7 @@ from pickleball_api.storage import (
     LocalFileStorage,
     ObjectNotFound,
     ObjectTooLarge,
+    Storage,
     discard_on_error,
     new_storage_key,
 )
@@ -125,3 +126,41 @@ def test_discard_on_error_removes_the_object(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="boom"), discard_on_error(storage, key):
         raise ValueError("boom")
     assert not storage.exists(key)
+
+
+def test_local_path_yields_the_stored_file_itself(tmp_path: Path) -> None:
+    """No copy: a match video is gigabytes and is already on this disk."""
+    storage = LocalFileStorage(tmp_path / "uploads")
+    key = new_storage_key(".mp4")
+    storage.write(key, [b"frames"], max_bytes=100)
+    with storage.local_path(key) as path:
+        assert path == storage.path_for(key)
+        assert path.read_bytes() == b"frames"
+        assert path.parent == storage.root
+    assert list(storage.root.iterdir()) == [path]  # nothing temporary left over
+
+
+def test_local_path_of_a_missing_object_raises_not_found(tmp_path: Path) -> None:
+    storage = LocalFileStorage(tmp_path / "uploads")
+    with pytest.raises(ObjectNotFound), storage.local_path(new_storage_key(".mp4")):
+        pass
+
+
+@pytest.mark.parametrize("key", ["../../etc/passwd", "/etc/passwd", "not-hex.mp4"])
+def test_local_path_refuses_a_key_outside_the_store(tmp_path: Path, key: str) -> None:
+    storage = LocalFileStorage(tmp_path / "uploads")
+    with pytest.raises(InvalidStorageKey), storage.local_path(key):
+        pass
+
+
+def test_local_path_refuses_a_directory_planted_under_a_key(tmp_path: Path) -> None:
+    storage = LocalFileStorage(tmp_path / "uploads")
+    key = new_storage_key(".mp4")
+    storage.path_for(key).mkdir()
+    with pytest.raises(ObjectNotFound), storage.local_path(key):
+        pass
+
+
+def test_local_file_storage_satisfies_the_storage_interface(tmp_path: Path) -> None:
+    storage: Storage = LocalFileStorage(tmp_path / "uploads")
+    assert callable(storage.local_path)

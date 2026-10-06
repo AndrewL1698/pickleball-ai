@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from pickleball_api import db
 from pickleball_api.models import AnalysisJob, Match, Video
 from pickleball_api.storage import LocalFileStorage, new_storage_key
-from pickleball_api.testing import migrated_sqlite_engine, video_bytes
+from pickleball_api.testing import migrated_sqlite_engine
+from pickleball_ml.video.fixtures import write_test_video
 
 
 @pytest.fixture
@@ -41,10 +42,17 @@ def storage(tmp_path: Path) -> LocalFileStorage:
 
 @pytest.fixture
 def stored_video(
-    engine: Engine, storage: LocalFileStorage
+    engine: Engine, storage: LocalFileStorage, tmp_path: Path
 ) -> tuple[Video, AnalysisJob]:
-    """A queued job whose video really is in storage."""
-    content = video_bytes(1032)
+    """A queued job whose video really is in storage, and really decodes.
+
+    A real 64x48, 20-frame, 10 fps clip written by OpenCV, tagged as rotated
+    90 degrees, so it plays as 48x64. The fake `ftyp` header the upload tests
+    use would pass the upload sniff but, correctly, fail to decode.
+    """
+    content = write_test_video(
+        tmp_path / "source.mp4", width=64, height=48, frames=20, fps=10.0, rotation=90
+    ).read_bytes()
     key = new_storage_key(".mp4")
     size = storage.write(key, [content], max_bytes=len(content) + 1)
     match = Match(name="match")

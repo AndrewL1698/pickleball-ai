@@ -53,18 +53,19 @@ through a background processing job, in the browser.
   natively or with `docker compose --profile app`, with migrations applied by
   the stack rather than by hand.
 
-The processing itself is a **placeholder**: it fingerprints the uploaded file
-rather than analysing it, so the plumbing could be finished before the
-expensive computer vision is wired in. No video is decoded. The web app states
-this on the page rather than presenting a finished-looking result.
+Phase 2 (court calibration) is in progress:
 
-Phase 2 (court calibration) is in progress. Checkpoint 1 is done: a `Match` now
-owns each uploaded video and every processing job, the API and web app are
-organised around matches (`/api/matches`, `/matches`), and a migration carried
-existing Phase 1 uploads over as matches. A match whose processing finished is
-`calibration_required`, never "ready". Real metadata extraction and secure
-video playback come next, before the calibration UI itself. See
-`docs/ROADMAP.md`.
+- Checkpoint 1: a `Match` owns each uploaded video and every processing job,
+  and the API and web app are organised around matches (`/api/matches`,
+  `/matches`).
+- Checkpoint 2: the worker decodes each video's **metadata** -- resolution in
+  display orientation, rotation, average frame rate, estimated duration, frame
+  count, codec -- and the match page shows it. A match whose metadata is
+  extracted is `calibration_required`, never "ready".
+
+Processing does nothing more than that yet: no frame is analysed and no model
+is loaded, and the web app says so on the page. Secure video playback comes
+next, then the calibration UI. See `docs/ROADMAP.md`.
 
 ## Development Setup
 
@@ -142,13 +143,29 @@ curl -s http://127.0.0.1:8000/api/jobs/<job_id>
 
 The job moves `queued -> running -> ready`, or `-> failed` with a code and a
 short message, and the match moves `uploaded -> processing ->
-calibration_required` (or `failed`) with it. Interactive API docs are at
+calibration_required` (or `failed`) with it. On success the match's
+`video.metadata` holds the decoded values; on failure it stays null. A file
+must really decode: bytes that merely start like an mp4 are accepted by the
+upload and then fail with `unreadable_video`. Interactive API docs are at
 http://127.0.0.1:8000/docs.
 
-Upgrading an existing Phase 1 database: `alembic upgrade head` applies
-migration 0003, which turns each uploaded video into a match with the same id
-and keeps every job. The old `/api/videos` endpoints are gone; the web app
-redirects `/videos` links to `/matches`.
+Retry a failed extraction, or extract metadata for a match uploaded before this
+existed (answers `409` if metadata exists or a job is already active):
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/matches/<match_id>/metadata-jobs
+```
+
+Upgrading an existing database: `alembic upgrade head` applies migration 0003,
+which turns each Phase 1 video into a match with the same id and keeps every
+job, and 0004, which adds the metadata columns. Those older matches have no
+metadata and nothing is queued for them automatically: use the endpoint above,
+or the **Extract metadata** button on the match page. The old `/api/videos`
+endpoints are gone; the web app redirects `/videos` links to `/matches`.
+
+The worker imports OpenCV (through `pickleball_ml.video`) but not torch: the
+worker depends on `pickleball-ml` without its `tracking` extra. `uv sync` at the
+root still installs everything, extra included, for the Phase 0 CLI.
 
 Uploads are written to `data/uploads/` (gitignored) under a generated key, never
 under the uploaded filename. Every environment variable, the full endpoint list,
@@ -166,9 +183,12 @@ cp .env.example .env.local      # defaults already point at a local API
 npm run dev                     # http://localhost:3000
 ```
 
-Three pages: upload a match, see every match, and follow one match's status
-and processing job. The match page polls while the job is queued or running and
-stops once it is ready or failed. Old `/videos` links redirect to `/matches`.
+Three pages: upload a match, see every match, and follow one match's status,
+processing job and decoded video metadata. The match page polls while the job is
+queued or running and stops once it is ready or failed. When a match has no
+metadata and nothing is running -- a failed attempt, or a match from before
+extraction existed -- it offers **Try again** or **Extract metadata**. Old
+`/videos` links redirect to `/matches`.
 
 Without `uv run pbworker` running, an upload stays `queued` for ever: nothing
 else consumes the queue. The page says as much.

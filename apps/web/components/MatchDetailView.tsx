@@ -1,16 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback } from "react";
-import { getMatch } from "@/lib/api";
+import { useCallback, useId, useRef, useState } from "react";
+import { ApiError, getMatch, startMetadataJob } from "@/lib/api";
 import { formatBytes } from "@/lib/files";
-import { formatDuration, formatTimestamp } from "@/lib/format";
+import {
+  formatAverageFps,
+  formatDuration,
+  formatMediaDuration,
+  formatTimestamp,
+} from "@/lib/format";
 import { MATCH_STATUS_COPY, STATUS_COPY, isFinished } from "@/lib/status";
-import type { MatchDetail } from "@/lib/types";
+import type { Job, MatchDetail, Video } from "@/lib/types";
 import { usePolledResource } from "@/hooks/usePolledResource";
 import { Notice } from "./Notice";
-import { PlaceholderNotice } from "./PlaceholderNotice";
 import { RefreshButton } from "./RefreshButton";
+import { ScopeNotice } from "./ScopeNotice";
 import { Spinner } from "./Spinner";
 import { MatchStatusBadge, StatusBadge } from "./StatusBadge";
 
@@ -107,7 +112,7 @@ export function MatchDetailView({
         <p className="mt-2 text-muted">{MATCH_STATUS_COPY[data.status].description}</p>
       </section>
 
-      <PlaceholderNotice />
+      <ScopeNotice />
 
       <header>
         <div className="flex flex-wrap items-center gap-3">
@@ -154,14 +159,15 @@ export function MatchDetailView({
             </>
           ) : null}
         </dl>
-        {/*
-          The server stores no duration, resolution or frame rate yet, so this
-          says so rather than rendering empty cells that read as "zero".
-        */}
-        <p className="mt-3 text-sm text-muted">
-          Video duration, resolution and frame rate are not extracted yet.
-        </p>
       </section>
+
+      <MetadataSection
+        matchId={data.id}
+        video={video}
+        job={job}
+        canExtract={data.can_extract_metadata}
+        onStarted={refresh}
+      />
 
       <section aria-labelledby="checks-heading">
         <h2 id="checks-heading" className="text-lg font-semibold">
@@ -208,6 +214,150 @@ export function MatchDetailView({
         </section>
       ) : null}
     </Shell>
+  );
+}
+
+/**
+ * The decoded metadata, or an honest account of why there is none.
+ *
+ * Nothing here is rendered as a blank or a zero: either the server has the
+ * value, or the section says which of the reasons for not having it applies.
+ * The extraction action appears only when the server says it would accept it
+ * (`can_extract_metadata`), so the page never offers a button that answers 409.
+ */
+function MetadataSection({
+  matchId,
+  video,
+  job,
+  canExtract,
+  onStarted,
+}: {
+  matchId: string;
+  video: Video | null;
+  job: Job | null;
+  canExtract: boolean;
+  onStarted: () => void;
+}) {
+  const metadata = video?.metadata ?? null;
+  const isActive = job?.status === "queued" || job?.status === "running";
+
+  return (
+    <section aria-labelledby="metadata-heading">
+      <h2 id="metadata-heading" className="text-lg font-semibold">
+        Video metadata
+      </h2>
+      {metadata ? (
+        <>
+          <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+            <Field label="Resolution (as displayed)" value={`${metadata.width} × ${metadata.height}`} />
+            <Field
+              label="Rotation"
+              value={
+                metadata.rotation_degrees === 0
+                  ? "None"
+                  : `${metadata.rotation_degrees}°, applied to the resolution above`
+              }
+            />
+            <Field
+              label="Duration (estimate)"
+              value={formatMediaDuration(metadata.duration_seconds)}
+            />
+            <Field label="Frame rate" value={formatAverageFps(metadata.average_fps)} />
+            <Field label="Frames" value={metadata.frame_count.toLocaleString()} />
+            <Field label="Codec" value={metadata.codec ?? "Not named by the file"} />
+            <Field label="Extracted" value={formatTimestamp(metadata.extracted_at)} />
+          </dl>
+          <p className="mt-3 text-sm text-muted">
+            The frame rate is an average. Phone video often varies its frame rate, so the
+            duration and any time worked out from frame numbers are approximate.
+          </p>
+        </>
+      ) : (
+        <div className="mt-3 space-y-3">
+          <p className="text-sm text-muted">{missingMetadataReason(video, job, isActive)}</p>
+          {canExtract ? (
+            <ExtractMetadataButton
+              matchId={matchId}
+              label={job?.status === "failed" ? "Try again" : "Extract metadata"}
+              onStarted={onStarted}
+            />
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function missingMetadataReason(video: Video | null, job: Job | null, isActive: boolean): string {
+  if (video === null) return "There is no video to read metadata from.";
+  if (isActive) return "Metadata is being extracted. It appears here when the job finishes.";
+  if (job?.status === "failed") return "No metadata was saved, because processing failed.";
+  if (job?.status === "ready") {
+    // Only matches uploaded before extraction existed get here: a job that
+    // finishes now saves metadata in the same step.
+    return "Metadata has not been extracted. This video was processed before metadata extraction was added.";
+  }
+  return "Metadata has not been extracted for this video.";
+}
+
+/**
+ * Asks the API for a new metadata job. The same in-flight rules as the upload
+ * form: a ref blocks a double submission that React would not re-render in
+ * time to stop, and `aria-disabled` keeps focus on the button.
+ */
+function ExtractMetadataButton({
+  matchId,
+  label,
+  onStarted,
+}: {
+  matchId: string;
+  label: string;
+  onStarted: () => void;
+}) {
+  const errorId = useId();
+  const inFlight = useRef(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  async function start() {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setIsStarting(true);
+    setProblem(null);
+    try {
+      await startMetadataJob(matchId);
+      // Reload the match: the new job is queued, so polling resumes.
+      onStarted();
+    } catch (cause) {
+      // The API's sentences for 409 and 503 are fixed and safe to show.
+      setProblem(
+        cause instanceof ApiError ? cause.message : "Something went wrong. Try again.",
+      );
+    } finally {
+      inFlight.current = false;
+      setIsStarting(false);
+    }
+  }
+
+  return (
+    <div>
+      <button
+        type="button"
+        aria-disabled={isStarting}
+        aria-describedby={problem ? errorId : undefined}
+        onClick={() => void start()}
+        className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-lg bg-accent px-4 font-medium text-background aria-disabled:cursor-default aria-disabled:opacity-60"
+      >
+        {isStarting ? <Spinner /> : null}
+        {isStarting ? "Starting…" : label}
+      </button>
+      {problem ? (
+        <p id={errorId} className="mt-2 text-sm font-medium text-red-700 dark:text-red-300">
+          <span aria-hidden="true">⚠ </span>
+          {problem}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

@@ -60,6 +60,11 @@ describe("status copy", () => {
     }
   });
 
+  it("describes a finished job as metadata, never as an analysed match", () => {
+    expect(STATUS_COPY.ready.description).toMatch(/metadata only/i);
+    expect(MATCH_STATUS_COPY.calibration_required.description).toMatch(/metadata has been extracted/i);
+  });
+
   it("admits calibration is not available yet", () => {
     expect(MATCH_STATUS_COPY.calibration_required.description).toMatch(/not available/i);
   });

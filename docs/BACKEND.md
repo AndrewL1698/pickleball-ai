@@ -1,26 +1,27 @@
 # Backend
 
 The FastAPI service, the database, the storage layer and the job worker added in
-Phase 1 and re-parented under `Match` in Phase 2 checkpoint 1. The architecture
+Phase 1, re-parented under `Match` in Phase 2 checkpoint 1, and given real video
+metadata extraction in checkpoint 2. The architecture
 this is heading towards is in `ARCHITECTURE.md`, and the eventual schema is in
 `DATA_MODEL.md`.
 
 ## What This Does and Does Not Do
 
 It does: accept a video upload as a new match, store the file, record the match,
-its video and a job, queue the job, let a worker claim it and drive it through
-`queued -> running -> ready` (or `failed`) while the match's status follows,
-and expose enough over HTTP for a frontend to list and inspect matches.
+its video and a job, queue the job, let a worker claim it, decode the video's
+metadata and drive the job through `queued -> running -> ready` (or `failed`)
+while the match's status follows, retry extraction on request, and expose
+enough over HTTP for a frontend to list and inspect matches.
 
-It does not analyze anything. The worker runs a **placeholder processor** that
-reads the stored file and records its SHA-256. That is deliberate: the job
-plumbing -- claiming, progress, terminal states, crash recovery -- is worth
-getting right on its own, and it can be tested in milliseconds rather than
-minutes. The real processor replaces one object behind one interface
-(`pickleball_worker.processors.VideoProcessor`).
+It does not analyse the match. The worker's `MetadataProcessor` reads the
+video's dimensions, rotation, average frame rate, duration, frame count and
+codec with `pickleball_ml.video.reader.read_metadata`, and nothing else: no
+frame is analysed and no model is loaded. It sits behind the same interface
+(`pickleball_worker.processors.VideoProcessor`) that later stages will use.
 
-There is no authentication, no calibration and no real metadata extraction
-yet. The web app that drives this API is described in `FRONTEND.md`.
+There is no authentication, no video playback and no calibration yet. The web
+app that drives this API is described in `FRONTEND.md`.
 
 ## Directory Structure
 
@@ -64,10 +65,16 @@ Both are uv workspace members alongside `ml/`.
 ```text
 pickleball_ml      imports nothing from this repository
 pickleball_api     imports neither pickleball_ml nor pickleball_worker
-pickleball_worker  imports pickleball_api, and will import pickleball_ml
+pickleball_worker  imports pickleball_api and pickleball_ml.video
 ```
 
-This is what keeps torch and ultralytics out of the API process. The API
+This is what keeps torch and ultralytics out of the API process. The worker
+imports only `pickleball_ml.video.reader`, and depends on `pickleball-ml`
+**without** its `tracking` extra: the base install is OpenCV, NumPy and the
+light libraries the pipeline modules import, while `ultralytics` (and through it
+torch) and `lap` are the extra, which the workspace root installs for the Phase 0
+CLI. So the worker image contains neither torch nor ultralytics, and a test
+asserts that importing the worker loads neither. The API
 enqueues by dotted path (`pickleball_worker.tasks.run_analysis_job`) rather than
 by importing the function, so the edge really does point one way.
 
@@ -77,7 +84,8 @@ by importing the function, so the edge really does point one way.
 |---|---|---|
 | `POST` | `/api/matches` | Multipart upload (`file`). Creates a `Match`, its `Video` and a queued `AnalysisJob`. `201` |
 | `GET` | `/api/matches` | Matches newest first, each with its video and latest job. `limit`, `offset` |
-| `GET` | `/api/matches/{match_id}` | One match, its video, its latest job and every job attempt. `404` if unknown |
+| `GET` | `/api/matches/{match_id}` | One match, its video and metadata, its latest job and every job attempt. `404` if unknown |
+| `POST` | `/api/matches/{match_id}/metadata-jobs` | Queue a metadata extraction job. `202` with the match; `409` if refused; `503` if it cannot be queued |
 | `GET` | `/api/jobs/{job_id}` | Status, stage, progress, timestamps, failure code, `match_id`. `404` if unknown |
 | `GET` | `/health` | Liveness. Touches no dependency |
 | `GET` | `/ready` | Readiness. Checks the database and Redis; `503` if either is down |
@@ -112,7 +120,25 @@ OpenAPI document moved to `0.2.0` for the break.
 }
 ```
 
-`MatchSummary` (each item of `GET /api/matches`) is the same without `jobs`.
+`video.metadata` is null until the worker has decoded the video, and otherwise:
+
+```json
+{
+  "width": 1080, "height": 1920, "rotation_degrees": 90,
+  "average_fps": 29.97, "duration_seconds": 754.2, "frame_count": 22603,
+  "codec": "hvc1", "extracted_at": "2026-09-25T18:40:01.12Z"
+}
+```
+
+`width` and `height` are in display orientation, after `rotation_degrees` was
+applied. `average_fps` is named for what it is: phone video is often variable
+frame rate, so it is not exact frame timing, and `duration_seconds` (frame count
+over the average) is an estimate. `codec` is the stream's FourCC, or null.
+`can_extract_metadata` says whether `POST .../metadata-jobs` would be accepted
+right now, so the UI never offers an action the API will refuse.
+
+`MatchSummary` (each item of `GET /api/matches`) is the same without `jobs` and
+`can_extract_metadata`.
 `video` is nullable in the schema because the database permits a match without
 one, but the upload path never produces it. The calibration will be added to
 `MatchDetail` when it exists; there is no placeholder field for it now.
@@ -146,12 +172,20 @@ Three tables. `matches` is the parent:
 | `content_type` | Derived from the extension allowlist, not from the client |
 | `byte_size` | `BIGINT`; a match exceeds `INT4` |
 | `created_at` | `timestamptz`, set in Python |
+| `width`, `height` | Display orientation. Nullable; `> 0` |
+| `rotation_degrees` | `0`, `90`, `180` or `270`. Nullable |
+| `average_fps` | Nullable; `> 0`. An average, not exact timing |
+| `duration_seconds`, `frame_count` | Nullable; `>= 0`. Duration is frame count over average rate |
+| `codec` | FourCC, `VARCHAR(32)`. Nullable even once decoded |
+| `metadata_extracted_at` | Null until decoded. A CHECK requires every decoded field to be present with it, and absent without it |
 
 `analysis_jobs`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `status`, `stage`,
 `progress` (0.0-1.0, with a CHECK), `error_code`, `error_message`, `created_at`,
 `started_at`, `finished_at`. Indexed on `(match_id, created_at)`, which serves
 both "every job for this match" and "its latest job". The latest job is the
-newest `created_at`, ties broken by `id`.
+newest `created_at`, ties broken by `id`. A partial unique index,
+`ux_analysis_jobs_one_active_per_match`, allows at most one `queued` or
+`running` job per match; job history is unaffected.
 
 `status` and `stage` are stored as `VARCHAR` plus a CHECK constraint (added in
 migration `0002`) rather than native PostgreSQL enums, so that adding a member
@@ -163,9 +197,9 @@ database the tests use.
 ### Relationship to `DATA_MODEL.md`
 
 `DATA_MODEL.md` describes `Match` owning a `VideoAsset` and a `ProcessingJob`,
-and that is now the shape here. `Video` is that `VideoAsset` minus the decoded
-metadata (which needs the decoder the placeholder does not run), and
-`AnalysisJob` is that `ProcessingJob`. `Match` has no `user_id` because there
+and that is now the shape here. `Video` is that `VideoAsset`, with its decoded
+metadata columns named for what they hold (`average_fps`), and `AnalysisJob` is
+that `ProcessingJob`. `Match` has no `user_id` because there
 are no users.
 
 ### Match Status
@@ -183,6 +217,29 @@ does (`pickleball_api.jobs.transition`):
 A new upload starts at `uploaded`. `court_ready` is reserved for the
 calibration checkpoint; nothing sets it yet. There is no `ready`, on purpose.
 
+`calibration_required` now also means "metadata extracted": the worker saves
+the metadata in the same commit as the `ready` transition that sets it.
+
+### Retrying Extraction
+
+`POST /api/matches/{match_id}/metadata-jobs` starts a new metadata job. It is
+accepted when the match has a video, its metadata has never been extracted, and
+no job is queued or running -- which covers both a failed attempt and every
+match that predates extraction. It is refused with `409` otherwise: the three
+reasons are `Match.metadata_job_refusal()`, and each has a fixed sentence.
+
+- Nothing is enqueued from a migration or at startup. Backfilled matches wait
+  for someone to ask.
+- A new job is added; earlier jobs, failed or not, stay in the history.
+- The job is committed before it is enqueued, and a queue failure marks it
+  `failed` with `enqueue_failed` and answers `503`, exactly as the upload does
+  (both go through `_enqueue_committed`).
+- Concurrency: the match row is locked (`SELECT ... FOR UPDATE`) while the rule
+  is checked, so two requests take turns on PostgreSQL. The partial unique index
+  is the backstop: a second active job fails at commit and is answered `409`.
+  An integration test fires eight simultaneous requests at PostgreSQL and
+  expects exactly one `202`.
+
 ### Job Status
 
 ```text
@@ -198,8 +255,9 @@ is the only way to change a status, and it raises `InvalidJobTransition` rather
 than writing a contradictory row; the worker treats that refusal as "another
 attempt already finished this" and leaves the first verdict alone.
 
-The stage names follow the ladder in `ARCHITECTURE.md`. The placeholder reaches
-`metadata_ready` and stops.
+The stage names follow the ladder in `ARCHITECTURE.md`. Metadata extraction
+reaches `metadata_ready` and stops; the job stays at `ingested` while it runs,
+and only the task layer sets `metadata_ready`, once the metadata is saved.
 
 ## The Upload Path
 
@@ -229,9 +287,16 @@ response is `503` with a fixed sentence; no Redis URL or path reaches it.
 
 ## Storage
 
-`Storage` is a `Protocol` with `write`/`open`/`delete`/`exists`/`size`, shaped
-like an object store so an S3 implementation slots in without touching callers.
-`LocalFileStorage` is the development implementation.
+`Storage` is a `Protocol` with `write`/`open`/`local_path`/`delete`/`exists`/
+`size`, shaped like an object store so an S3 implementation slots in without
+touching callers. `LocalFileStorage` is the development implementation.
+
+`local_path(key)` is a context manager yielding a local file for code that can
+only read a path -- the video decoder. `LocalFileStorage` yields its own
+validated file, with no copy; an object-store implementation would download to
+a temporary file and delete it on exit, which is why callers use the path only
+inside the `with` block and treat it as read-only. It raises `ObjectNotFound` on
+entry. Nothing reads a whole video into memory.
 
 Nothing from the client reaches the filesystem. The key is generated, matched
 against `^[0-9a-f]{32}\.[a-z0-9]{1,8}$`, and the resolved path is confirmed to
@@ -249,6 +314,34 @@ id and nothing else: everything else is read from PostgreSQL (job -> match ->
 video), so the queue is not a channel through which paths or configuration can
 be injected. A job whose match has no video is failed with
 `missing_video_file` during the claim, without ever reaching `running`.
+
+### Metadata Extraction
+
+`MetadataProcessor.process` checks the stored object's size against the upload
+record, opens it with `storage.local_path`, calls `read_metadata`, and returns a
+typed `ProcessingResult`. It never touches the database: the task layer's
+`_complete` locks the job, writes the metadata onto the video and moves the job
+to `ready` at `metadata_ready` -- and the match to `calibration_required` -- in
+one commit. If that commit fails (a CHECK refuses the values, the database goes
+away) the job is failed with `internal` instead; it is never `ready` without
+its metadata. A job that is no longer `running` when the result arrives keeps
+the verdict and metadata it already has.
+
+| Failure | Code | Metadata |
+|---|---|---|
+| Object missing from storage | `missing_video_file` | left null |
+| Stored size differs from the upload record | `unreadable_video` | left null |
+| OpenCV cannot open it (`VideoReadError`) | `unreadable_video` | left null |
+| Implausible values: zero size, no frame rate, non-right-angle rotation (`InvalidVideoMetadata`) | `unreadable_video` | left null |
+| Anything else (a bug) | `internal`, traceback logged | left null |
+
+The user sees only the code's fixed sentence. The decoder's message, the
+storage key and the filesystem path go to the worker log.
+
+`read_metadata` sets OpenCV's auto-orientation explicitly, so width, height and
+frames are all in display orientation, and validates everything: rotation is
+normalised into `{0, 90, 180, 270}` (so `-90` becomes `270`), and a zero,
+negative or non-finite value is refused rather than stored.
 
 Three separate transactions -- claim, each progress report, and the terminal
 transition -- so that a status the API can see is written as soon as it is true,
@@ -333,6 +426,19 @@ configured, so the migrations always target the same database the API does, and
 no credential sits in a tracked file. Always read an autogenerated migration
 before committing it.
 
+### Migration 0004: video metadata
+
+`0004_video_metadata` adds the nullable metadata columns and their CHECK
+constraints, and the partial unique index allowing one active job per match.
+No existing row has metadata, because nothing decoded video before it.
+
+It also moves every `calibration_required` match back to `uploaded`. That status
+now promises decoded metadata, which none of the matches backfilled by 0003 has
+-- their "finished" job only fingerprinted the file. It enqueues nothing: those
+matches show an **Extract metadata** action and wait for someone to use it. The
+downgrade drops the columns and index and leaves those statuses `uploaded`,
+which is valid at 0003 too.
+
 ## Dependencies and Processes
 
 ```bash
@@ -370,11 +476,22 @@ explicitly, since SQLite leaves them off and the tests would otherwise be more
 permissive than production. The queue is a recording double; `test_queue.py`
 covers the real RQ adapter against `fakeredis`.
 
+Video decoding is tested without the network or an ffmpeg binary.
+`pickleball_ml.video.fixtures.write_test_video` writes a few-kilobyte clip with
+OpenCV, byte-for-byte deterministic, and can tag it with a rotation by patching
+the track header's display matrix -- which is where a phone records it. The
+worker's `stored_video` fixture stores one of these (64x48, tagged 90 degrees)
+and a test decodes it end to end, expecting 48x64. The processor's own tests
+mock `read_metadata` where the processor looks it up
+(`pickleball_worker.processors.read_metadata`). The fake `ftyp` bytes the
+upload tests use are, correctly, *not* decodable; one test relies on that.
+
 The integration tests apply the migrations to a throwaway PostgreSQL database,
 compare the result against the models (catching a model edited without a new
 migration), and roll it back again. They also seed Phase 1 rows at revision
-0002 and take them up through 0003, back down and up again, checking every row
-on the way; `test_migration_0003.py` does the same on SQLite in the default
+0002 and take them up through 0003 and 0004, back down and up again, checking
+every row on the way, and `test_retry_concurrency.py` races eight requests for
+one match against the retry endpoint; `test_migration_0003.py` does the same on SQLite in the default
 suite.
 
 ## Troubleshooting
@@ -382,6 +499,14 @@ suite.
 **Jobs stay `queued` for ever.** Nothing is consuming the queue: start
 `uv run pbworker`, or `docker compose --profile app up -d worker`. The status
 page says as much rather than pretending something is happening.
+
+**Every job fails with `unreadable_video`.** The file is not a video OpenCV can
+decode. The upload's `ftyp` check only looks at the first bytes; the worker is
+the real test. The worker log has the decoder's own message.
+
+**The containerised worker fails with `libGL.so.1: cannot open shared object
+file`.** The image was built before `libgl1` was added; rebuild with
+`docker compose --profile app up -d --build`.
 
 **Every job fails with `missing_video_file`.** The API and the worker resolved
 different upload directories. `PICKLEBALL_UPLOAD_DIR` defaults to the relative
@@ -432,15 +557,10 @@ logged with their traceback and answered with one sentence.
 
 Phase 1 is complete; everything below is later-phase work.
 
-**Remaining prerequisites for Phase 2 (court calibration).** The `Match`
-ownership model is done (checkpoint 1). Still to build before the calibration
-UI itself:
+**Remaining prerequisite for Phase 2 (court calibration).** The `Match`
+ownership model (checkpoint 1) and metadata extraction (checkpoint 2) are done.
+Still to build before the calibration UI itself:
 
-- Real video metadata extraction — fps, dimensions, duration, frame count,
-  rotation — via `pickleball_ml.video.reader.read_metadata`, replacing
-  `PlaceholderProcessor` behind the existing `VideoProcessor` interface. The
-  calibration UI cannot place landmarks on a frame the backend has never
-  decoded.
 - Serving uploaded video back to the browser, which needs its own decisions
   about origin, `Content-Disposition` and `X-Content-Type-Options`; an mp4 that
   is also valid HTML is a stored-XSS vector if it is served from the app's own
@@ -448,10 +568,10 @@ UI itself:
 
 Known gaps in what is here:
 
-- **Nothing re-queues a job whose enqueue failed.** It is marked `failed` and
-  visible, but there is no retry endpoint and no sweeper, so the
-  `failed -> queued` transition the state machine allows is unreachable over
-  HTTP.
+- **Retries are manual.** A failed extraction is retried by
+  `POST .../metadata-jobs`, which adds a new job; nothing retries
+  automatically, and the `failed -> queued` transition on an existing job is
+  still unused. Once metadata exists there is no way to extract it again.
 - **No authentication or per-user authorization.** Every match is visible to
   anyone who can reach the port.
 - **Nothing edits a match.** `name` and `recorded_at` are set at upload and
@@ -467,7 +587,12 @@ Known gaps in what is here:
 - **A worker killed mid-job leaves its row in `running` for ever.** There is no
   reaper; `JobErrorCode.ABANDONED` is reserved for one and is currently unused.
   The same applies to a crash between the commit and the enqueue, which leaves
-  a `queued` row with nothing on the queue.
+  a `queued` row with nothing on the queue. Since checkpoint 2 this also blocks
+  the retry endpoint for that match, because the stuck job counts as active;
+  the fix is the reaper, not loosening the one-active-job rule.
+- **Duration is an estimate.** It is frame count over average frame rate, not
+  the container's own duration, which OpenCV does not expose. For variable
+  frame-rate video the two can differ slightly.
 - **Redis is trusted.** RQ deserializes job metadata with pickle, so a reachable
   Redis is worker code execution. The queue payload is only an opaque job id
   and everything else is re-read from PostgreSQL, so a tampered message can at

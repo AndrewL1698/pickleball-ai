@@ -16,6 +16,28 @@ export function formatTimestamp(iso: string): string {
   });
 }
 
+/**
+ * A video's length: "12.5 s" under a minute, then "m:ss" or "h:mm:ss".
+ * Returns "Unknown" for anything that is not a finite, non-negative number.
+ */
+export function formatMediaDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "Unknown";
+  if (seconds < 60) return `${seconds.toFixed(1)} s`;
+  const whole = Math.round(seconds);
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const secs = String(whole % 60).padStart(2, "0");
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${secs}`
+    : `${minutes}:${secs}`;
+}
+
+/** A frame rate to two decimals, labelled as the average it is. */
+export function formatAverageFps(fps: number): string {
+  if (!Number.isFinite(fps) || fps <= 0) return "Unknown";
+  return `${fps.toFixed(2)} fps average`;
+}
+
 /** How long a job took, once it has both ends. */
 export function formatDuration(startIso: string | null, endIso: string | null): string | null {
   if (startIso === null || endIso === null) return null;

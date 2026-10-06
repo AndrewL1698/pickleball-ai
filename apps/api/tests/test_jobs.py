@@ -173,7 +173,9 @@ def test_a_match_has_at_most_one_video(session: Session) -> None:
 
 def test_deleting_a_match_deletes_its_video_and_jobs(session: Session) -> None:
     match = make_match()
-    session.add_all([match, AnalysisJob(match=match), AnalysisJob(match=match)])
+    session.add_all(
+        [match, AnalysisJob(match=match, status=JobStatus.FAILED), AnalysisJob(match=match)]
+    )
     session.commit()
     session.delete(match)
     session.commit()
@@ -251,7 +253,9 @@ def test_the_latest_job_does_not_depend_on_insertion_order(session: Session) -> 
     """Ordered by `created_at`, not by whichever row the database returns last."""
     match = make_match()
     newer = AnalysisJob(match=match, created_at=datetime(2026, 9, 2, tzinfo=UTC))
-    older = AnalysisJob(match=match, created_at=datetime(2026, 9, 1, tzinfo=UTC))
+    older = AnalysisJob(
+        match=match, status=JobStatus.FAILED, created_at=datetime(2026, 9, 1, tzinfo=UTC)
+    )
     session.add_all([match, newer, older])
     session.commit()
     session.expire_all()
@@ -264,7 +268,7 @@ def test_the_latest_job_does_not_depend_on_insertion_order(session: Session) -> 
 def test_a_dead_heat_on_created_at_is_broken_by_id(session: Session) -> None:
     match = make_match()
     at = datetime(2026, 9, 1, tzinfo=UTC)
-    low = AnalysisJob(id=uuid.UUID(int=1), match=match, created_at=at)
+    low = AnalysisJob(id=uuid.UUID(int=1), match=match, status=JobStatus.FAILED, created_at=at)
     high = AnalysisJob(id=uuid.UUID(int=2), match=match, created_at=at)
     session.add_all([match, high, low])
     session.commit()

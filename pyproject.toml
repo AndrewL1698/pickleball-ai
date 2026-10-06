@@ -3,7 +3,9 @@ name = "pickleball-ai"
 version = "0.1.0"
 description = "Pickleball match intelligence monorepo"
 requires-python = ">=3.13,<3.14"
-dependencies = ["pickleball-ml", "pickleball-api", "pickleball-worker"]
+# `tracking` brings ultralytics and torch for the Phase 0 CLI; the worker
+# depends on the base package only.
+dependencies = ["pickleball-ml[tracking]", "pickleball-api", "pickleball-worker"]
 
 [dependency-groups]
 dev = [

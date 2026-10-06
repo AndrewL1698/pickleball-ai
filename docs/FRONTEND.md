@@ -1,8 +1,9 @@
 # Frontend
 
-The Next.js app added in Phase 1 checkpoint 2 and moved from "Videos" to
-"Matches" in Phase 2 checkpoint 1. It covers uploading a match's video and
-following the processing job that results. The backend it talks to is
+The Next.js app added in Phase 1 checkpoint 2, moved from "Videos" to
+"Matches" in Phase 2 checkpoint 1, and showing decoded video metadata since
+checkpoint 2. It covers uploading a match's video, following the processing job
+that results, and reading what it found. The backend it talks to is
 described in `BACKEND.md`.
 
 ## What It Does and Does Not Do
@@ -11,11 +12,13 @@ It does: take a video by file picker or drag-and-drop, validate it before and
 after submission, upload it as a new match, list every match, and follow one
 match's status and its job through `queued`, `running`, `ready` and `failed` —
 polling only while the answer can still change, and surviving a refresh or a
-revisit because the server is the only source of truth.
+revisit because the server is the only source of truth — show the video
+metadata the worker decoded, and start a new extraction where the API would
+accept one.
 
 It does not play video, calibrate the court, or show analysis results. Nothing
-serves the uploaded file back, and processing is a placeholder that records a
-checksum. The UI says so, on the page, in as many words.
+serves the uploaded file back, and processing reads metadata only. The UI says
+so, on the page, in as many words.
 
 ## Structure
 
@@ -35,7 +38,7 @@ apps/web/
 │   ├── MatchListView.tsx       # loading / empty / error / populated
 │   ├── MatchDetailView.tsx     # the polling page
 │   ├── StatusBadge.tsx         # job and match badges: word + glyph + colour, never colour alone
-│   ├── PlaceholderNotice.tsx   # "this build does not analyse video yet"
+│   ├── ScopeNotice.tsx         # "this build reads video metadata only"
 │   ├── Notice.tsx              # boxed message, caller chooses the ARIA role
 │   ├── RefreshButton.tsx       # shared, so its aria-disabled handling cannot drift
 │   └── Spinner.tsx
@@ -44,7 +47,7 @@ apps/web/
 │   ├── api.ts                  # the only module that calls the backend
 │   ├── types.ts                # hand-written mirrors of the Pydantic schemas
 │   ├── files.ts                # client-side upload validation
-│   ├── format.ts               # timestamps and durations
+│   ├── format.ts               # timestamps, durations, media length, average fps
 │   └── status.ts               # the words used for each job and match status
 ├── next.config.ts              # includes the legacy /videos redirects
 ├── scripts/check-contract.mjs  # fails if lib/types.ts drifts from the API
@@ -99,7 +102,7 @@ docker compose --profile app up -d --build
 |---|---|
 | `/` | Upload a match. Drag-and-drop or file picker, validation, links to the new match |
 | `/matches` | Every match, newest first: name, file, upload date, and match status |
-| `/matches/:id` | One match: its status, its video, its latest job's state, earlier attempts, and a manual refresh |
+| `/matches/:id` | One match: its status, its video and decoded metadata, its latest job's state, earlier attempts, a manual refresh, and **Extract metadata** / **Try again** when usable |
 | `/videos` | Redirects (307) to `/matches` |
 | `/videos/:id` | Redirects (307) to `/matches/:id` |
 
@@ -117,6 +120,30 @@ are temporary redirects so no browser caches them permanently.
 A match is named after its upload's filename, without the extension, and that
 name is the page title and the list link. The original filename is shown as
 metadata under **Video**.
+
+### Video metadata
+
+The **Video metadata** section shows what the worker decoded, or says which of
+the reasons for having nothing applies. It never renders a blank or a zero:
+
+| State | What it says |
+|---|---|
+| Decoded | Resolution (as displayed), rotation, estimated duration, frame rate labelled "average", frame count, codec (or "Not named by the file"), and when it was extracted |
+| Job queued or running | Metadata is being extracted |
+| Latest job failed | No metadata was saved, because processing failed — with **Try again** |
+| Job finished before extraction existed | Processed before metadata extraction was added — with **Extract metadata** |
+
+Resolution is in display orientation, which is what the API returns: a
+portrait phone clip stored sideways reads 1080 × 1920, with "90°, applied to the
+resolution above" beside it. A note under the values says the frame rate is an
+average and that durations derived from it are approximate.
+
+The button appears only when `can_extract_metadata` is true, so the server
+decides and the page never offers an action that would answer 409. Pressing it
+calls `POST /api/matches/{id}/metadata-jobs`, then reloads the match, and polling
+resumes because the new job is queued. It follows the upload form's rules: a
+ref blocks a double submission, `aria-disabled` keeps focus on the button, and a
+refusal or queue failure is shown beside it, linked with `aria-describedby`.
 
 ## Environment Variables
 
@@ -156,8 +183,9 @@ the running API serves and compares field names and enum values (`JobStatus`,
 `JobStage`, `MatchStatus`) against the declarations, and checks that the
 routes the client calls exist. Run it after any change to the API's schemas.
 
-The client calls `listMatches`, `getMatch`, `createMatch` (the upload) and
-`getJob`.
+The client calls `listMatches`, `getMatch`, `createMatch` (the upload),
+`startMetadataJob` and `getJob`. `startMetadataJob` sends a `POST` with no body
+and no headers, so it stays a CORS simple request.
 
 ## Polling
 
@@ -182,22 +210,24 @@ nothing else.
 - A 404 stops the loop, because it will not fix itself.
 - Polling stops on a terminal status, and the page says so.
 
-## Honesty About the Placeholder
+## Honesty About What Was Analysed
 
 `CLAUDE.md` says not to hide uncertainty from the frontend and to prefer
 "unknown" over a confidently wrong label. A green **Ready** badge on a
 video-analysis product would otherwise read as "your match has been analysed",
-when all that happened is a checksum.
+when all that happened is that its metadata was read.
 
-So: the status page carries a permanent notice that the build does not analyse
-video; `ready` is headed **File check complete**, never "Analysis complete";
-there is no results link; the unimplemented pipeline stages are not drawn as a
-progress checklist; and the metadata the server does not have is stated as not
-extracted rather than shown as blank fields or zeros.
+So: the status page carries a permanent notice that the build reads video
+metadata only; a `ready` job is headed **Processing finished**, with a sentence
+saying processing covers metadata only and no match analysis was performed,
+never "Analysis complete"; there is no results link; the unimplemented pipeline
+stages are not drawn as a progress checklist; the frame rate is labelled an
+average; and metadata the server does not have is explained rather than shown as
+blank fields or zeros.
 
-The match status follows the same rules. A match whose job finished is
+The match status follows the same rules. A match whose metadata is extracted is
 **Needs calibration**, in amber rather than green, with a sentence saying
-calibration is not available in this build yet. There is no "Ready" match
+metadata was extracted and calibration is not available in this build yet. There is no "Ready" match
 badge, because the API has no such status. Tests assert that no match status
 label or description reads as a finished analysis.
 
@@ -259,6 +289,11 @@ restart of `npm run dev` — and a rebuild of the Docker image.
 **An upload returns 415 for a file that really is a video.** The API checks the
 first bytes for an ISO base-media `ftyp` box. Some older QuickTime `.mov` files
 begin with `moov` instead and are refused.
+
+**Every new upload ends "Processing failed" with `unreadable_video`.** The file
+is not a video OpenCV can decode. The live suite's upload is deliberately just an
+mp4 header, so it ends here too; a real clip ends at **Needs calibration**. If a
+real video fails, check the worker's log.
 
 **The job never leaves "Queued".** No worker is running. Start `uv run pbworker`
 from the repository root.

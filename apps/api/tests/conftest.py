@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from pickleball_api.config import Settings
+from pickleball_api.config import Settings, get_settings
 from pickleball_api.db import get_session
 from pickleball_api.dependencies import get_queue, get_storage
 from pickleball_api.main import create_app
@@ -87,3 +87,29 @@ def client(
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+TEST_DATABASE = "pickleball_migration_test"
+
+
+@pytest.fixture
+def fresh_database() -> Iterator[str]:
+    """An empty PostgreSQL database, dropped again afterwards.
+
+    For the `integration` tests; skips when no PostgreSQL is running.
+    """
+    admin_url = get_settings().database_url.get_secret_value()
+    admin = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    target = admin_url.rsplit("/", 1)[0] + "/" + TEST_DATABASE
+    try:
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{TEST_DATABASE}"'))
+            connection.execute(text(f'CREATE DATABASE "{TEST_DATABASE}"'))
+    except Exception as exc:  # no PostgreSQL running
+        pytest.skip(f"PostgreSQL is not available: {type(exc).__name__}")
+    yield target
+    with admin.connect() as connection:
+        connection.execute(text(f'DROP DATABASE IF EXISTS "{TEST_DATABASE}"'))
+    admin.dispose()
+
+

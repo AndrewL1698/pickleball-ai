@@ -6,12 +6,12 @@
  *
  * Two facts about this build shape all of the copy here:
  *
- * - Processing is a placeholder. It reads the uploaded file and records a
- *   checksum; no court, player, ball or rally analysis exists. A `ready` job
- *   must therefore never be described as an analysed match.
- * - `running` is often never observed. The placeholder finishes in
- *   milliseconds, so `queued -> ready` between two polls is normal, and the UI
- *   must not present `running` as a step that has to be seen.
+ * - Processing extracts video metadata and nothing else. No court, player,
+ *   ball or rally analysis exists, so a `ready` job must never be described
+ *   as an analysed match -- only as metadata extracted.
+ * - `running` is often never observed. Reading metadata takes well under a
+ *   second, so `queued -> ready` between two polls is normal, and the UI must
+ *   not present `running` as a step that has to be seen.
  */
 
 import type { JobStatus, MatchStatus } from "./types";
@@ -37,18 +37,20 @@ export const STATUS_COPY: Record<JobStatus, StatusCopy> = {
   },
   running: {
     label: "Running",
-    heading: "Checking the file",
-    description: "A worker is reading the uploaded file.",
+    heading: "Reading video metadata",
+    description: "A worker is reading the video's resolution, duration and frame rate.",
     announcement: "Job running.",
   },
   ready: {
-    // Deliberately not "Analysis complete". The only thing that finished is a
-    // file check, and saying otherwise would be a confidently wrong label.
+    // Deliberately not "Analysis complete". Processing covers video metadata
+    // only, and saying otherwise would be a confidently wrong label. It also
+    // does not claim metadata was saved: jobs from before metadata extraction
+    // existed finished too, and the video section says what is actually known.
     label: "Ready",
-    heading: "File check complete",
+    heading: "Processing finished",
     description:
-      "The upload was read successfully and its checksum recorded. No match analysis has been performed.",
-    announcement: "File check finished. No match analysis was performed.",
+      "This job finished. Processing currently covers video metadata only; no match analysis has been performed.",
+    announcement: "Processing finished. No match analysis was performed.",
   },
   failed: {
     label: "Failed",
@@ -72,16 +74,16 @@ export function isFinished(status: JobStatus): boolean {
 export const MATCH_STATUS_COPY: Record<MatchStatus, { label: string; description: string }> = {
   uploaded: {
     label: "Uploaded",
-    description: "The video is stored and waiting to be processed.",
+    description: "The video is stored. Its metadata has not been extracted yet.",
   },
   processing: {
     label: "Processing",
-    description: "A worker is processing the video.",
+    description: "A worker is reading the video's metadata.",
   },
   calibration_required: {
     label: "Needs calibration",
     description:
-      "The file check finished. The court has to be calibrated next, and calibration is not available in this build yet.",
+      "Video metadata has been extracted. The court has to be calibrated next, and calibration is not available in this build yet.",
   },
   court_ready: {
     label: "Court calibrated",
@@ -90,6 +92,6 @@ export const MATCH_STATUS_COPY: Record<MatchStatus, { label: string; description
   },
   failed: {
     label: "Failed",
-    description: "The latest processing attempt failed.",
+    description: "The latest processing attempt failed, and no metadata was saved.",
   },
 };

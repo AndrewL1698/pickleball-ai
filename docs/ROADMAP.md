@@ -205,7 +205,21 @@ checkpoint. The API is match-oriented (`POST/GET /api/matches`,
 `GET /api/matches/{id}`; `/api/videos` removed), and the web app moved to
 `/matches` and `/matches/:id`, with `/videos` paths redirecting.
 
-Next: real metadata extraction in the worker, then secure playback.
+Status (2026-09-25): checkpoint 2 done - real video metadata extraction. The
+worker's default processor is now `MetadataProcessor`, which reads width and
+height (in display orientation), rotation, average frame rate, estimated
+duration, frame count and codec with `pickleball_ml.video.reader.read_metadata`
+and returns a typed result; the task layer saves it in the same transaction as
+the job's `ready` transition. Migration `0004_video_metadata` adds nullable,
+CHECK-constrained metadata columns and a partial unique index allowing one
+active job per match, and moves backfilled `calibration_required` matches back to
+`uploaded`, since none was ever decoded. `POST /api/matches/{id}/metadata-jobs`
+retries a failed extraction or extracts metadata for an older match, and the
+match page shows the metadata and offers that action only when it is usable.
+The worker depends on `pickleball-ml` without its `tracking` extra, so its image
+has OpenCV but not torch.
+
+Next: secure playback of the uploaded video, then the calibration UI.
 
 Build:
 

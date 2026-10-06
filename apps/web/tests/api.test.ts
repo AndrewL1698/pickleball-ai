@@ -6,7 +6,14 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createMatch, getJob, getMatch, listMatches } from "@/lib/api";
+import {
+  ApiError,
+  createMatch,
+  getJob,
+  getMatch,
+  listMatches,
+  startMetadataJob,
+} from "@/lib/api";
 import { JOB_READY, MATCH_DETAIL, jsonResponse, videoFile } from "./fixtures";
 
 function mockFetch(implementation: (...args: never[]) => Promise<Response>) {
@@ -139,5 +146,32 @@ describe("getJob", () => {
   it("parses a terminal job", async () => {
     mockFetch(async () => jsonResponse(JOB_READY));
     await expect(getJob(JOB_READY.id)).resolves.toMatchObject({ status: "ready", progress: 1 });
+  });
+});
+
+describe("startMetadataJob", () => {
+  it("posts to the match's metadata-jobs collection with no body or headers", async () => {
+    const fetchMock = mockFetch(async () => jsonResponse(MATCH_DETAIL, 202));
+    await startMetadataJob("abc/def");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/api\/matches\/abc%2Fdef\/metadata-jobs$/);
+    expect(init.method).toBe("POST");
+    // A simple CORS request: no body, no custom headers, so no preflight.
+    expect(init.body).toBeUndefined();
+    expect(init.headers).toBeUndefined();
+  });
+
+  it("surfaces a refusal as a readable, non-retryable error", async () => {
+    mockFetch(async () =>
+      jsonResponse(
+        { error_code: "conflict", detail: "This match's video metadata has already been extracted." },
+        409,
+      ),
+    );
+    const error = (await startMetadataJob("x").catch((e: unknown) => e)) as ApiError;
+    expect(error.status).toBe(409);
+    expect(error.code).toBe("conflict");
+    expect(error.message).toMatch(/already been extracted/);
+    expect(error.isRetryable).toBe(false);
   });
 });

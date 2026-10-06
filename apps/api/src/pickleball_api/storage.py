@@ -15,7 +15,7 @@ import re
 import shutil
 import uuid
 from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
@@ -70,6 +70,19 @@ class Storage(Protocol):
 
     def open(self, key: str) -> BinaryIO:
         """Open the stored object for reading. Raises `ObjectNotFound`."""
+
+    def local_path(self, key: str) -> AbstractContextManager[Path]:
+        """A local file holding the object, for as long as the block runs.
+
+        For code that can only read a filesystem path -- a video decoder, for
+        instance -- which is why a key alone is not enough. The path is only
+        valid inside the `with` block and must be treated as read-only.
+
+        A local store yields the file it already has, with no copy. An object
+        store would download to a temporary file, yield that, and delete it on
+        exit; callers are written for that case, so they never keep the path.
+        Raises `ObjectNotFound` on entry if nothing is stored under `key`.
+        """
 
     def delete(self, key: str) -> None:
         """Remove the object. Succeeds whether or not it existed."""
@@ -144,6 +157,15 @@ class LocalFileStorage:
             return path.open("rb")
         except FileNotFoundError as exc:
             raise ObjectNotFound(key) from exc
+
+    @contextmanager
+    def local_path(self, key: str) -> Iterator[Path]:
+        """The object's own file, validated and inside the root. Never copied:
+        a match video is gigabytes, and it is already on this disk."""
+        path = self.path_for(key)
+        if not path.is_file():
+            raise ObjectNotFound(key)
+        yield path
 
     def delete(self, key: str) -> None:
         self.path_for(key).unlink(missing_ok=True)

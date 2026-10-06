@@ -1,6 +1,7 @@
 """Creating a match by upload, and the read endpoints around it."""
 
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -234,6 +235,8 @@ def test_the_latest_job_is_the_newest_attempt_and_jobs_are_oldest_first(
     created = upload(client, "match.mp4").json()
     match = session.get(Match, uuid.UUID(created["id"]))
     assert match is not None
+    assert match.latest_job is not None
+    match.latest_job.status = JobStatus.FAILED  # only one job may be active
     retry = AnalysisJob(match=match)
     session.add(retry)
     session.commit()
@@ -268,11 +271,18 @@ def test_the_openapi_contract_describes_matches(client: TestClient) -> None:
     }
     assert set(schemas["MatchDetail"]["properties"]) == set(
         schemas["MatchSummary"]["properties"]
-    ) | {"jobs"}
+    ) | {"jobs", "can_extract_metadata"}
     assert set(schemas["MatchList"]["properties"]) == {"matches", "count"}
     assert set(schemas["VideoRead"]["properties"]) == {
-        "id", "original_filename", "content_type", "byte_size", "created_at",
+        "id", "original_filename", "content_type", "byte_size", "created_at", "metadata",
     }
+    assert set(schemas["VideoMetadataRead"]["properties"]) == {
+        "width", "height", "rotation_degrees", "average_fps", "duration_seconds",
+        "frame_count", "codec", "extracted_at",
+    }
+    # Named for what it is: an average, not an exact frame rate.
+    assert "fps" not in schemas["VideoMetadataRead"]["properties"]
+    assert "/api/matches/{match_id}/metadata-jobs" in client.get("/openapi.json").json()["paths"]
     assert "match_id" in schemas["JobRead"]["properties"]
     assert "video_id" not in schemas["JobRead"]["properties"]
     assert schemas["MatchStatus"]["enum"] == [
@@ -386,3 +396,209 @@ def test_a_long_filename_keeps_its_extension(client: TestClient) -> None:
     response = upload(client, "a" * 250 + ".mp4")
     assert response.status_code == 201
     assert response.json()["video"]["original_filename"].endswith(".mp4")
+
+
+# --- decoded metadata and the metadata-jobs endpoint --------------------------
+
+
+def _decode(session: Session, match_id: str, **overrides: object) -> None:
+    """Record metadata as a successful job would."""
+    match = session.get(Match, uuid.UUID(match_id))
+    assert match is not None and match.video is not None
+    values: dict[str, object] = {
+        "width": 1080, "height": 1920, "rotation_degrees": 90, "average_fps": 29.97,
+        "duration_seconds": 12.5, "frame_count": 375, "codec": "avc1",
+        "metadata_extracted_at": datetime.now(UTC),
+    }
+    values.update(overrides)
+    for name, value in values.items():
+        setattr(match.video, name, value)
+    assert match.latest_job is not None
+    match.latest_job.status = JobStatus.READY
+    session.commit()
+
+
+def _fail_latest(session: Session, match_id: str) -> None:
+    match = session.get(Match, uuid.UUID(match_id))
+    assert match is not None and match.latest_job is not None
+    match.latest_job.status = JobStatus.FAILED
+    match.status = MatchStatus.FAILED
+    session.commit()
+
+
+def test_an_upload_has_no_metadata_until_the_worker_decodes_it(client: TestClient) -> None:
+    body = upload(client, "match.mp4").json()
+    assert body["video"]["metadata"] is None
+    # A job is already queued, so there is nothing to start.
+    assert body["can_extract_metadata"] is False
+
+
+def test_decoded_metadata_is_returned_in_display_orientation(
+    client: TestClient, session: Session
+) -> None:
+    created = upload(client, "match.mp4").json()
+    _decode(session, created["id"])
+    metadata = client.get(f"/api/matches/{created['id']}").json()["video"]["metadata"]
+    assert metadata["width"] == 1080 and metadata["height"] == 1920
+    assert metadata["rotation_degrees"] == 90
+    assert metadata["average_fps"] == pytest.approx(29.97)
+    assert metadata["frame_count"] == 375
+    assert metadata["codec"] == "avc1"
+    assert metadata["extracted_at"]
+    listed = client.get("/api/matches").json()["matches"][0]
+    assert listed["video"]["metadata"]["width"] == 1080
+
+
+def test_a_decoded_video_with_no_codec_name_says_null(
+    client: TestClient, session: Session
+) -> None:
+    created = upload(client, "match.mp4").json()
+    _decode(session, created["id"], codec=None)
+    metadata = client.get(f"/api/matches/{created['id']}").json()["video"]["metadata"]
+    assert metadata["codec"] is None
+
+
+def test_metadata_can_be_requested_after_a_failure_and_history_is_kept(
+    client: TestClient, session: Session, queue: RecordingJobQueue
+) -> None:
+    created = upload(client, "match.mp4").json()
+    _fail_latest(session, created["id"])
+    before = client.get(f"/api/matches/{created['id']}").json()
+    assert before["can_extract_metadata"] is True
+
+    response = client.post(f"/api/matches/{created['id']}/metadata-jobs")
+    assert response.status_code == 202
+    body = response.json()
+    assert [j["id"] for j in body["jobs"]][0] == created["latest_job"]["id"]
+    assert len(body["jobs"]) == 2
+    assert body["jobs"][0]["status"] == "failed"  # the old attempt is untouched
+    assert body["latest_job"]["status"] == "queued"
+    assert body["latest_job"]["match_id"] == created["id"]
+    assert body["status"] == MatchStatus.UPLOADED.value
+    assert body["can_extract_metadata"] is False
+    assert queue.enqueued[-1] == uuid.UUID(body["latest_job"]["id"])
+
+
+def test_a_backfilled_match_with_a_finished_placeholder_job_can_be_decoded(
+    client: TestClient, session: Session, queue: RecordingJobQueue
+) -> None:
+    """Phase 1 rows: the job reached `ready` but nothing was ever decoded."""
+    created = upload(client, "match.mp4").json()
+    match = session.get(Match, uuid.UUID(created["id"]))
+    assert match is not None and match.latest_job is not None
+    match.latest_job.status = JobStatus.READY
+    match.status = MatchStatus.UPLOADED
+    session.commit()
+
+    response = client.post(f"/api/matches/{created['id']}/metadata-jobs")
+    assert response.status_code == 202
+    assert len(response.json()["jobs"]) == 2
+
+
+def test_the_job_is_committed_before_it_is_enqueued(
+    client: TestClient,
+    session: Session,
+    session_factory: sessionmaker[Session],
+    queue: RecordingJobQueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = upload(client, "match.mp4").json()
+    _fail_latest(session, created["id"])
+    seen: list[bool] = []
+
+    def enqueue(job_id: uuid.UUID) -> str:
+        # What a worker would see the moment the message lands.
+        with session_factory() as other:
+            seen.append(other.get(AnalysisJob, job_id) is not None)
+        return "ok"
+
+    monkeypatch.setattr(queue, "enqueue", enqueue)
+    assert client.post(f"/api/matches/{created['id']}/metadata-jobs").status_code == 202
+    assert seen == [True]
+
+
+def test_a_second_request_while_a_job_is_active_is_refused(
+    client: TestClient, session: Session, queue: RecordingJobQueue
+) -> None:
+    created = upload(client, "match.mp4").json()
+    _fail_latest(session, created["id"])
+    assert client.post(f"/api/matches/{created['id']}/metadata-jobs").status_code == 202
+    enqueued = list(queue.enqueued)
+
+    response = client.post(f"/api/matches/{created['id']}/metadata-jobs")
+    assert response.status_code == 409
+    assert response.json() == {
+        "error_code": "conflict",
+        "detail": "A processing job for this match is already queued or running.",
+    }
+    assert queue.enqueued == enqueued
+    assert len(client.get(f"/api/matches/{created['id']}").json()["jobs"]) == 2
+
+
+def test_a_request_racing_past_the_check_is_refused_by_the_database(
+    client: TestClient,
+    session: Session,
+    queue: RecordingJobQueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two requests can both pass the application's check before either
+    commits. The partial unique index is what stops the second."""
+    created = upload(client, "match.mp4").json()  # its job is still queued
+    monkeypatch.setattr(Match, "metadata_job_refusal", lambda self: None)
+    enqueued = list(queue.enqueued)
+
+    response = client.post(f"/api/matches/{created['id']}/metadata-jobs")
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "conflict"
+    assert queue.enqueued == enqueued
+    session.expire_all()
+    match = session.get(Match, uuid.UUID(created["id"]))
+    assert match is not None and len(match.jobs) == 1
+
+
+def test_metadata_that_already_exists_is_not_extracted_again(
+    client: TestClient, session: Session
+) -> None:
+    created = upload(client, "match.mp4").json()
+    _decode(session, created["id"])
+    assert client.get(f"/api/matches/{created['id']}").json()["can_extract_metadata"] is False
+    response = client.post(f"/api/matches/{created['id']}/metadata-jobs")
+    assert response.status_code == 409
+    assert "already been extracted" in response.json()["detail"]
+
+
+def test_a_match_with_no_video_cannot_be_processed(
+    client: TestClient, session: Session
+) -> None:
+    match = Match(name="empty")
+    session.add(match)
+    session.commit()
+    response = client.post(f"/api/matches/{match.id}/metadata-jobs")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "This match has no video to process."
+
+
+def test_metadata_jobs_for_an_unknown_match_is_a_404(client: TestClient) -> None:
+    response = client.post(f"/api/matches/{uuid.uuid4()}/metadata-jobs")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No such match."
+
+
+def test_a_retry_that_cannot_be_queued_fails_visibly_and_safely(
+    client: TestClient, session: Session, queue: RecordingJobQueue
+) -> None:
+    created = upload(client, "match.mp4").json()
+    _fail_latest(session, created["id"])
+    queue.available = False
+    response = client.post(f"/api/matches/{created['id']}/metadata-jobs")
+    assert response.status_code == 503
+    assert response.json() == {
+        "error_code": "dependency_unavailable",
+        "detail": "The job was recorded but could not be queued for processing.",
+    }
+    detail = client.get(f"/api/matches/{created['id']}").json()
+    assert detail["status"] == "failed"
+    assert [j["status"] for j in detail["jobs"]] == ["failed", "failed"]
+    assert detail["latest_job"]["error_code"] == "enqueue_failed"
+    # Nothing is left active, so it can be tried again once the queue is back.
+    assert detail["can_extract_metadata"] is True

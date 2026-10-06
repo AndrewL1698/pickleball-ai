@@ -7,7 +7,7 @@
  * instead of on the behaviour.
  */
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MatchDetailView } from "@/components/MatchDetailView";
@@ -17,6 +17,8 @@ import {
   JOB_READY,
   JOB_RUNNING,
   MATCH_DETAIL,
+  VIDEO,
+  VIDEO_METADATA,
   jsonResponse,
   wait,
 } from "./fixtures";
@@ -36,8 +38,20 @@ const MATCH_STATUS_FOR: Record<Job["status"], MatchStatus> = {
   failed: "failed",
 };
 
+/** The match as the server returns it once its latest job is `job`: a job
+ * that finished today has saved its metadata, and nothing active means the
+ * extraction action is available only when metadata is missing. */
 function withJob(job: Job) {
-  return { ...MATCH_DETAIL, status: MATCH_STATUS_FOR[job.status], latest_job: job, jobs: [job] };
+  const metadata = job.status === "ready" ? VIDEO_METADATA : null;
+  const active = job.status === "queued" || job.status === "running";
+  return {
+    ...MATCH_DETAIL,
+    status: MATCH_STATUS_FOR[job.status],
+    video: { ...VIDEO, metadata },
+    latest_job: job,
+    jobs: [job],
+    can_extract_metadata: metadata === null && !active,
+  };
 }
 
 /** Answers each poll with the next job state, repeating the last one. */
@@ -58,8 +72,8 @@ describe("status lifecycle", () => {
     render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     expect(await screen.findByText(/waiting to start/i)).toBeInTheDocument();
-    expect(await screen.findByText(/checking the file/i)).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: /file check complete/i })).toBeInTheDocument();
+    expect(await screen.findByText(/reading video metadata/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /processing finished/i })).toBeInTheDocument();
 
     await waitFor(() =>
       expect(screen.getByText(/checking has stopped/i)).toBeInTheDocument(),
@@ -77,14 +91,14 @@ describe("status lifecycle", () => {
     respondWith([JOB_QUEUED, JOB_READY]);
     render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
-    expect(await screen.findByRole("heading", { name: /file check complete/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /processing finished/i })).toBeInTheDocument();
   }, 10000);
 
   it("does not poll at all when the job is already finished", async () => {
     const fetchMock = respondWith([JOB_READY]);
     render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
-    await screen.findByRole("heading", { name: /file check complete/i });
+    await screen.findByRole("heading", { name: /processing finished/i });
     await wait(150);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -137,13 +151,13 @@ describe("headings and announcements in every state", () => {
   });
 });
 
-describe("honesty about the placeholder", () => {
+describe("honesty about what was analysed", () => {
   it("never claims the match was analysed", async () => {
     respondWith([JOB_READY]);
     const { container } = render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
-    await screen.findByRole("heading", { name: /file check complete/i });
+    await screen.findByRole("heading", { name: /processing finished/i });
 
-    expect(screen.getByText(/does not analyse video yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/reads video metadata only/i)).toBeInTheDocument();
     expect(screen.getByText(/No match analysis has been performed/i)).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/analysis complete/i);
     expect(container.textContent).not.toMatch(/view results/i);
@@ -152,7 +166,7 @@ describe("honesty about the placeholder", () => {
   it("says the match needs calibration, and that calibration is not available", async () => {
     respondWith([JOB_READY]);
     render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
-    await screen.findByRole("heading", { name: /file check complete/i });
+    await screen.findByRole("heading", { name: /processing finished/i });
     expect(screen.getByTestId("match-status-badge")).toHaveTextContent(/needs calibration/i);
     expect(screen.getByText(/calibration is not available in this build/i)).toBeInTheDocument();
   });
@@ -172,13 +186,11 @@ describe("honesty about the placeholder", () => {
     );
   }, 10000);
 
-  it("says metadata is missing rather than showing empty fields", async () => {
+  it("no longer claims metadata is not extracted once it has been", async () => {
     respondWith([JOB_READY]);
-    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
-    await screen.findByRole("heading", { name: /file check complete/i });
-    expect(
-      screen.getByText(/duration, resolution and frame rate are not extracted yet/i),
-    ).toBeInTheDocument();
+    const { container } = render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    await screen.findByRole("heading", { name: /processing finished/i });
+    expect(container.textContent).not.toMatch(/not extracted yet/i);
   });
 });
 
@@ -200,7 +212,7 @@ describe("announcements", () => {
 
     await waitFor(() => {
       const live = container.querySelector('p[role="status"].sr-only');
-      expect(live?.textContent).toMatch(/file check finished/i);
+      expect(live?.textContent).toMatch(/processing finished/i);
     });
     // No timestamp or counter, so an unchanged status re-announces nothing.
     const live = container.querySelector('p[role="status"].sr-only');
@@ -252,7 +264,7 @@ describe("manual refresh", () => {
     const user = userEvent.setup();
     render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
-    await screen.findByRole("heading", { name: /file check complete/i });
+    await screen.findByRole("heading", { name: /processing finished/i });
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: /refresh/i }));
@@ -274,11 +286,11 @@ describe("manual refresh", () => {
     const user = userEvent.setup();
     render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
-    await screen.findByRole("heading", { name: /file check complete/i });
+    await screen.findByRole("heading", { name: /processing finished/i });
     await user.click(screen.getByRole("button", { name: /refresh/i }));
 
     await waitFor(() => expect(call).toBeGreaterThan(1));
-    expect(screen.getByRole("heading", { name: /file check complete/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /processing finished/i })).toBeInTheDocument();
     expect(screen.getByTestId("status-badge")).toHaveTextContent(/ready/i);
     expect(screen.queryByText(/could not load this match/i)).not.toBeInTheDocument();
   }, 10000);
@@ -299,7 +311,7 @@ describe("manual refresh", () => {
     const user = userEvent.setup();
     render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
-    await screen.findByRole("heading", { name: /file check complete/i });
+    await screen.findByRole("heading", { name: /processing finished/i });
     const button = screen.getByRole("button", { name: /refresh/i });
     expect(button).toHaveAttribute("aria-disabled", "false");
 
@@ -352,4 +364,156 @@ describe("cleanup", () => {
     expect(fetchMock).toHaveBeenCalledTimes(callsAtUnmount);
     expect(signals.at(-1)?.aborted).toBe(true);
   }, 10000);
+});
+
+describe("video metadata", () => {
+  function metadataSection() {
+    return screen.getByRole("region", { name: /video metadata/i });
+  }
+
+  it("shows every decoded field, in display orientation, with the average labelled", async () => {
+    respondWith([JOB_READY]);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    await screen.findByRole("heading", { name: /processing finished/i });
+
+    const section = metadataSection();
+    const value = (label: RegExp) =>
+      within(section).getByText(label).nextElementSibling?.textContent;
+    expect(value(/resolution \(as displayed\)/i)).toBe("1080 × 1920");
+    expect(value(/^rotation$/i)).toMatch(/90°/);
+    expect(value(/duration \(estimate\)/i)).toBe("12:34");
+    expect(value(/^frame rate$/i)).toBe("29.97 fps average");
+    expect(value(/^frames$/i)).toBe((22603).toLocaleString());
+    expect(value(/^codec$/i)).toBe("hvc1");
+    expect(within(section).getByText(/frame rate is an average/i)).toBeInTheDocument();
+    // Metadata complete is not analysis complete.
+    expect(screen.getByTestId("match-status-badge")).toHaveTextContent(/needs calibration/i);
+  });
+
+  it("says when a video does not name its codec instead of leaving a blank", async () => {
+    const match = withJob(JOB_READY);
+    const noCodec = { ...match, video: { ...VIDEO, metadata: { ...VIDEO_METADATA, codec: null } } };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(noCodec)));
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    await screen.findByRole("heading", { name: /processing finished/i });
+    expect(within(metadataSection()).getByText(/not named by the file/i)).toBeInTheDocument();
+  });
+
+  it("says metadata is being extracted while the job is active, with no action", async () => {
+    respondWith([JOB_RUNNING]);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    await screen.findByRole("heading", { name: /reading video metadata/i });
+    expect(within(metadataSection()).getByText(/being extracted/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /extract metadata|try again/i })).toBeNull();
+  });
+
+  it("offers a retry after a failure and never shows zeros", async () => {
+    respondWith([JOB_FAILED]);
+    const { container } = render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    await screen.findByRole("heading", { name: /processing failed/i });
+    expect(within(metadataSection()).getByText(/no metadata was saved/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/0 × 0|0\.00 fps/);
+  });
+
+  it("offers extraction for a match processed before extraction existed", async () => {
+    // A backfilled Phase 1 match: its job finished, but nothing was decoded.
+    const legacy = {
+      ...withJob(JOB_READY),
+      status: "uploaded" as const,
+      video: { ...VIDEO, metadata: null },
+      can_extract_metadata: true,
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(legacy)));
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    expect(
+      await screen.findByText(/processed before metadata extraction was added/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /extract metadata/i })).toBeInTheDocument();
+  });
+
+  it("hides the action whenever the server says it would be refused", async () => {
+    const refused = { ...withJob(JOB_FAILED), can_extract_metadata: false };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(refused)));
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    await screen.findByRole("heading", { name: /processing failed/i });
+    expect(screen.queryByRole("button", { name: /try again|extract metadata/i })).toBeNull();
+  });
+
+  it("starts a job, then follows it to completion", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    let phase: "failed" | "queued" | "ready" = "failed";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        calls.push({ url, method });
+        if (method === "POST") {
+          phase = "queued";
+          return jsonResponse(withJob(JOB_QUEUED), 202);
+        }
+        const current = phase === "failed" ? JOB_FAILED : phase === "queued" ? JOB_QUEUED : JOB_READY;
+        if (phase === "queued") phase = "ready";
+        return jsonResponse(withJob(current));
+      }),
+    );
+    const user = userEvent.setup();
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+
+    await user.click(await screen.findByRole("button", { name: /try again/i }));
+    expect(await screen.findByRole("heading", { name: /processing finished/i }, { timeout: 3000 }))
+      .toBeInTheDocument();
+    expect(within(metadataSection()).getByText("1080 × 1920")).toBeInTheDocument();
+
+    const post = calls.filter((c) => c.method === "POST");
+    expect(post).toHaveLength(1);
+    expect(post[0].url).toMatch(new RegExp(`/api/matches/${MATCH_ID}/metadata-jobs$`));
+  }, 10000);
+
+  it("does not send a second request while the first is in flight", async () => {
+    let release!: (value: Response) => void;
+    const posts: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          posts.push(url);
+          return new Promise<Response>((resolve) => { release = resolve; });
+        }
+        return Promise.resolve(jsonResponse(withJob(JOB_FAILED)));
+      }),
+    );
+    const user = userEvent.setup();
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    const button = await screen.findByRole("button", { name: /try again/i });
+    await user.click(button);
+    const busy = await screen.findByRole("button", { name: /starting/i });
+    expect(busy).toHaveAttribute("aria-disabled", "true");
+    await user.click(busy);
+    expect(posts).toHaveLength(1);
+    release(jsonResponse(withJob(JOB_QUEUED), 202));
+  });
+
+  it("shows the server's refusal next to the button", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) =>
+        init?.method === "POST"
+          ? jsonResponse(
+              {
+                error_code: "conflict",
+                detail: "A processing job for this match is already queued or running.",
+              },
+              409,
+            )
+          : jsonResponse(withJob(JOB_FAILED)),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    const button = await screen.findByRole("button", { name: /try again/i });
+    await user.click(button);
+    const message = await screen.findByText(/already queued or running/i);
+    expect(button.getAttribute("aria-describedby")).toBe(message.id);
+  });
 });

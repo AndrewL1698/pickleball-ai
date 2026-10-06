@@ -19,8 +19,10 @@ from pickleball_api.testing import ALEMBIC_INI, FTYP_HEADER, video_bytes
 __all__ = [
     "ALEMBIC_INI",
     "FTYP_HEADER",
+    "MATCHES",
     "PHASE_1",
     "Phase1Rows",
+    "assert_at_0004",
     "assert_downgraded",
     "assert_upgraded",
     "seed_phase_1",
@@ -48,6 +50,8 @@ def upload(
 # from the models, which no longer describe that schema.
 
 PHASE_1 = "0002_enum_checks"
+#: Revision 0003: matches introduced, before metadata columns.
+MATCHES = "0003_match_ownership"
 
 _videos_v1 = sa.table(
     "videos",
@@ -179,3 +183,26 @@ def _as_uuid(value: object) -> uuid.UUID:
     if isinstance(value, uuid.UUID):
         return value
     return uuid.UUID(str(value))
+
+
+def assert_at_0004(connection: sa.Connection, seeded: Phase1Rows) -> None:
+    """After 0004: nothing decoded, and nothing claims to be ready for calibration.
+
+    0003 derived `calibration_required` from a finished placeholder job; 0004
+    moves those back to `uploaded`, since none of them has metadata.
+    """
+    rows = connection.execute(
+        sa.text(
+            "SELECT m.id, m.status, v.width, v.metadata_extracted_at FROM matches m "
+            "JOIN videos v ON v.match_id = m.id"
+        )
+    ).all()
+    assert {_as_uuid(row.id) for row in rows} == set(seeded.videos)
+    for row in rows:
+        expected = seeded.expected_status[_as_uuid(row.id)]
+        if expected == "calibration_required":
+            expected = "uploaded"
+        assert row.status == expected
+        assert row.width is None and row.metadata_extracted_at is None
+    jobs = connection.execute(sa.text("SELECT id FROM analysis_jobs")).scalars().all()
+    assert {_as_uuid(job) for job in jobs} == set(seeded.jobs)

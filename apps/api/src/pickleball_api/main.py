@@ -104,6 +104,7 @@ _STATUS_CODES = {
     400: "bad_request",
     404: "not_found",
     405: "method_not_allowed",
+    409: "conflict",
     413: "upload_too_large",
     415: "unsupported_file_type",
     503: "dependency_unavailable",

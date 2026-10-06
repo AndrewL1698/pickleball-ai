@@ -3,8 +3,12 @@ name = "pickleball-worker"
 version = "0.1.0"
 description = "RQ worker that runs analysis jobs for uploaded videos"
 requires-python = ">=3.13,<3.14"
+# pickleball-ml without the `tracking` extra: the worker reads video metadata
+# with OpenCV and must not install or import torch. The dependency points one
+# way, worker -> ml; nothing in ml imports the worker or the API.
 dependencies = [
     "pickleball-api",
+    "pickleball-ml",
     "rq>=2",
 ]
 

@@ -6,7 +6,7 @@
  */
 
 import { type ReactNode, createElement } from "react";
-import type { Job, MatchDetail, MatchSummary, Video } from "@/lib/types";
+import type { Job, MatchDetail, MatchSummary, Video, VideoMetadata } from "@/lib/types";
 
 export const JOB_QUEUED: Job = {
   id: "4fc1f817-fe2d-4279-a0be-87125fd6c733",
@@ -53,6 +53,19 @@ export const VIDEO: Video = {
   content_type: "video/mp4",
   byte_size: 2418,
   created_at: "2026-09-23T18:00:52.792390Z",
+  metadata: null,
+};
+
+/** A portrait phone clip: stored sideways, tagged 90 degrees, plays 1080x1920. */
+export const VIDEO_METADATA: VideoMetadata = {
+  width: 1080,
+  height: 1920,
+  rotation_degrees: 90,
+  average_fps: 29.97,
+  duration_seconds: 754.2,
+  frame_count: 22603,
+  codec: "hvc1",
+  extracted_at: "2026-09-25T18:40:01.120000Z",
 };
 
 export const MATCH_SUMMARY: MatchSummary = {
@@ -68,6 +81,7 @@ export const MATCH_SUMMARY: MatchSummary = {
 export const MATCH_DETAIL: MatchDetail = {
   ...MATCH_SUMMARY,
   jobs: [JOB_QUEUED],
+  can_extract_metadata: false,
 };
 
 /** A `Response` the way the API sends one. */

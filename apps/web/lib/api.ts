@@ -119,6 +119,20 @@ export function getJob(jobId: string, signal?: AbortSignal): Promise<Job> {
 }
 
 /**
+ * Queue a metadata extraction job for a match whose metadata is absent --
+ * after a failure, or for a match that predates extraction. The API answers
+ * 409 when it already has metadata or a job is active, and 503 when the job
+ * was recorded but could not be queued.
+ */
+export function startMetadataJob(matchId: string, signal?: AbortSignal): Promise<MatchDetail> {
+  // No body and no headers, so this stays a CORS simple request.
+  return request<MatchDetail>(`/api/matches/${encodeURIComponent(matchId)}/metadata-jobs`, {
+    method: "POST",
+    signal,
+  });
+}
+
+/**
  * Create a match by uploading its video. The field name must be `file`: it is
  * what the API's multipart parameter is called.
  */

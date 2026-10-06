@@ -41,6 +41,8 @@ it("uploads a video and gets back a match with its video and a queued job", asyn
   expect(created.video?.original_filename).toBe("live-check.mp4");
   expect(created.video?.content_type).toBe("video/mp4");
   expect(created.video?.byte_size).toBeGreaterThan(0);
+  // Decoding happens in the worker, never in the upload request.
+  expect(created.video?.metadata).toBeNull();
   expect(created.jobs).toHaveLength(1);
   expect(created.latest_job?.status).toBe("queued");
   expect(created.latest_job?.match_id).toBe(created.id);

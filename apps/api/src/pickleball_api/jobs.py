@@ -132,6 +132,17 @@ def _sync_match_status(job: AnalysisJob) -> None:
     match.status = target
 
 
+def new_job(match: Match) -> AnalysisJob:
+    """A fresh queued job for `match`, with the match's status to match.
+
+    Earlier jobs are left exactly as they were: every attempt stays in the
+    match's history. The caller commits, then enqueues.
+    """
+    job = AnalysisJob(match=match, status=JobStatus.QUEUED, stage=JobStage.INGESTED, progress=0.0)
+    _sync_match_status(job)
+    return job
+
+
 def report_progress(
     job: AnalysisJob, stage: JobStage, progress: float
 ) -> AnalysisJob:

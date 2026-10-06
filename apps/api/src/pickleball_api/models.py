@@ -14,6 +14,7 @@ whole table.
 
 import enum
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import (
@@ -24,10 +25,12 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    Integer,
     String,
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -77,6 +80,22 @@ class MatchStatus(enum.StrEnum):
     COURT_READY = "court_ready"
     #: The latest processing attempt failed.
     FAILED = "failed"
+
+
+#: The job statuses that mean "a worker has, or is about to have, this match".
+ACTIVE_JOB_STATUSES = (JobStatus.QUEUED, JobStatus.RUNNING)
+
+#: SQL for the partial unique index that allows one active job per match.
+#: Literal, because it is part of the schema: migration 0004 carries a copy.
+ACTIVE_JOB_PREDICATE = "status IN ('queued', 'running')"
+
+
+class MetadataJobRefusal(enum.StrEnum):
+    """Why a match cannot be given a new metadata extraction job."""
+
+    NO_VIDEO = "no_video"
+    JOB_ACTIVE = "job_active"
+    ALREADY_EXTRACTED = "already_extracted"
 
 
 class JobStage(enum.StrEnum):
@@ -151,6 +170,49 @@ class Match(Base):
         """
         return self.jobs[-1] if self.jobs else None
 
+    def metadata_job_refusal(self) -> MetadataJobRefusal | None:
+        """Why a new metadata job may not start, or None if it may.
+
+        A job may start when the video's metadata has never been extracted --
+        which covers a previous failure and every match backfilled from Phase 1
+        -- and nothing is already queued or running for the match. Here so the
+        API and the `can_extract_metadata` flag the UI reads cannot disagree.
+        The partial unique index on `analysis_jobs` is the backstop against two
+        requests racing past this check.
+        """
+        if self.video is None:
+            return MetadataJobRefusal.NO_VIDEO
+        if any(job.status in ACTIVE_JOB_STATUSES for job in self.jobs):
+            return MetadataJobRefusal.JOB_ACTIVE
+        if self.video.metadata_extracted_at is not None:
+            return MetadataJobRefusal.ALREADY_EXTRACTED
+        return None
+
+    @property
+    def can_extract_metadata(self) -> bool:
+        return self.metadata_job_refusal() is None
+
+
+@dataclass(frozen=True)
+class DecodedVideoMetadata:
+    """A video's decoded metadata, present only once all of it is known.
+
+    `width` and `height` are in display orientation, the way the video plays;
+    `rotation_degrees` is the container's rotation tag that the decoder applied
+    to get there. `average_fps` is an average: phone video is often variable
+    frame rate, so it does not give exact frame timing, and `duration_seconds`
+    (frame count over average rate) is an estimate on the same terms.
+    """
+
+    width: int
+    height: int
+    rotation_degrees: int
+    average_fps: float
+    duration_seconds: float
+    frame_count: int
+    codec: str | None
+    extracted_at: datetime
+
 
 class Video(Base):
     """An uploaded video file, recorded once its bytes are safely in storage."""
@@ -170,6 +232,21 @@ class Video(Base):
         DateTime(timezone=True), default=utcnow, server_default=func.now(), index=True
     )
 
+    # Decoded by the worker, never the upload request. All null until a job
+    # succeeds -- rows from Phase 1 were never decoded -- and written together
+    # with the job's terminal transition. Never zero-filled on failure.
+    width: Mapped[int | None] = mapped_column(Integer, default=None)
+    height: Mapped[int | None] = mapped_column(Integer, default=None)
+    rotation_degrees: Mapped[int | None] = mapped_column(Integer, default=None)
+    average_fps: Mapped[float | None] = mapped_column(Float, default=None)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, default=None)
+    frame_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: The FourCC, when the stream names one; may be null even once decoded.
+    codec: Mapped[str | None] = mapped_column(String(32), default=None)
+    metadata_extracted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+
     match: Mapped[Match] = relationship(back_populates="video")
 
     __table_args__ = (
@@ -177,7 +254,56 @@ class Video(Base):
         # One video per match for the MVP. Dropping this constraint is the
         # whole migration if a match ever needs a second camera.
         UniqueConstraint("match_id", name="uq_videos_match_id"),
+        # Each value is valid on its own terms, and null is always allowed...
+        CheckConstraint("width IS NULL OR width > 0", name="ck_videos_width_positive"),
+        CheckConstraint("height IS NULL OR height > 0", name="ck_videos_height_positive"),
+        CheckConstraint(
+            "average_fps IS NULL OR average_fps > 0", name="ck_videos_average_fps_positive"
+        ),
+        CheckConstraint(
+            "duration_seconds IS NULL OR duration_seconds >= 0",
+            name="ck_videos_duration_non_negative",
+        ),
+        CheckConstraint(
+            "frame_count IS NULL OR frame_count >= 0", name="ck_videos_frame_count_non_negative"
+        ),
+        CheckConstraint(
+            "rotation_degrees IS NULL OR rotation_degrees IN (0, 90, 180, 270)",
+            name="ck_videos_rotation_right_angle",
+        ),
+        # ...but the decoded fields arrive together or not at all, so a
+        # half-written record cannot pass for metadata. `codec` is exempt.
+        CheckConstraint(
+            "(metadata_extracted_at IS NULL AND width IS NULL AND height IS NULL"
+            " AND rotation_degrees IS NULL AND average_fps IS NULL"
+            " AND duration_seconds IS NULL AND frame_count IS NULL AND codec IS NULL)"
+            " OR (metadata_extracted_at IS NOT NULL AND width IS NOT NULL"
+            " AND height IS NOT NULL AND rotation_degrees IS NOT NULL"
+            " AND average_fps IS NOT NULL AND duration_seconds IS NOT NULL"
+            " AND frame_count IS NOT NULL)",
+            name="ck_videos_metadata_complete",
+        ),
     )
+
+    @property
+    def decoded_metadata(self) -> DecodedVideoMetadata | None:
+        """The metadata as one value, or None if it has not been extracted."""
+        if self.metadata_extracted_at is None:
+            return None
+        # The CHECK constraint guarantees these once the timestamp is set.
+        assert self.width is not None and self.height is not None
+        assert self.rotation_degrees is not None and self.average_fps is not None
+        assert self.duration_seconds is not None and self.frame_count is not None
+        return DecodedVideoMetadata(
+            width=self.width,
+            height=self.height,
+            rotation_degrees=self.rotation_degrees,
+            average_fps=self.average_fps,
+            duration_seconds=self.duration_seconds,
+            frame_count=self.frame_count,
+            codec=self.codec,
+            extracted_at=self.metadata_extracted_at,
+        )
 
 
 class AnalysisJob(Base):
@@ -216,4 +342,14 @@ class AnalysisJob(Base):
         CheckConstraint("progress >= 0.0 AND progress <= 1.0", name="ck_analysis_jobs_progress"),
         # Serves both "every job for this match" and "its latest job".
         Index("ix_analysis_jobs_match_id_created_at", "match_id", "created_at"),
+        # At most one queued or running job per match, enforced by the
+        # database: two retry requests racing past the application's check
+        # cannot both commit. A partial index, so job history is unaffected.
+        Index(
+            "ux_analysis_jobs_one_active_per_match",
+            "match_id",
+            unique=True,
+            postgresql_where=text(ACTIVE_JOB_PREDICATE),
+            sqlite_where=text(ACTIVE_JOB_PREDICATE),
+        ),
     )

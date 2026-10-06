@@ -1,7 +1,7 @@
 /**
  * The shapes the API actually returns.
  *
- * Hand-written rather than generated: the contract is three entities, and a
+ * Hand-written rather than generated: the contract is a handful of shapes, and a
  * codegen step is more machinery than it earns here. The guard against drift
  * is `npm run check:contract`, which diffs these names against the live
  * OpenAPI schema (scripts/check-contract.mjs).
@@ -59,16 +59,38 @@ export interface Job {
   finished_at: string | null;
 }
 
+/** The rotations a video container can carry, in degrees. */
+export type Rotation = 0 | 90 | 180 | 270;
+
 /**
- * The stored video behind a match. Decoded metadata (duration, resolution,
- * frame rate) is not extracted yet, so it is not here.
+ * What the worker decoded from the video.
+ *
+ * `width` and `height` are in display orientation -- how the video plays --
+ * after `rotation_degrees` was applied. `average_fps` is an average, not exact
+ * frame timing: phone video is often variable frame rate, and
+ * `duration_seconds` is frame count over that average, so an estimate too.
  */
+export interface VideoMetadata {
+  width: number;
+  height: number;
+  rotation_degrees: Rotation;
+  average_fps: number;
+  duration_seconds: number;
+  frame_count: number;
+  /** The stream's FourCC, or null when it does not name one. */
+  codec: string | null;
+  extracted_at: string;
+}
+
+/** The stored video behind a match. */
 export interface Video {
   id: string;
   original_filename: string;
   content_type: string;
   byte_size: number;
   created_at: string;
+  /** Null until a job has decoded it; never zero-filled. */
+  metadata: VideoMetadata | null;
 }
 
 /** A match in a list, with its video and the status of its most recent job. */
@@ -89,6 +111,12 @@ export interface MatchSummary {
 /** One match and every attempt made at processing it, oldest first. */
 export interface MatchDetail extends MatchSummary {
   jobs: Job[];
+  /**
+   * Whether the API would accept a metadata extraction request right now:
+   * metadata is absent and no job is queued or running. The server decides;
+   * the UI only offers the action when this is true.
+   */
+  can_extract_metadata: boolean;
 }
 
 export interface MatchList {

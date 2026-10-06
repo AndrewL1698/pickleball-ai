@@ -7,7 +7,7 @@ Implementation status (Phase 2 checkpoint 1): three of these tables exist.
 | Here | In the database today |
 |---|---|
 | `Match` | `matches`, without `user_id` (there are no users yet) |
-| `VideoAsset` | `videos`, with a unique `match_id`, minus the decoded metadata (no decoder runs yet) |
+| `VideoAsset` | `videos`, with a unique `match_id` and nullable decoded metadata (Phase 2 checkpoint 2) |
 | `ProcessingJob` | `analysis_jobs`, owned by `match_id`, plus an `error_code` column |
 
 Ownership points Match -> VideoAsset and Match -> ProcessingJob, so every later
@@ -62,20 +62,33 @@ an already calibrated match leaves it `court_ready`.
 
 ```text
 id
-match_id             # unique: one video per match for the MVP
+match_id               # unique: one video per match for the MVP
 storage_key
-filename             # `original_filename`: display metadata, never a path
-width
-height
-rotation_degrees     # phone videos often carry rotation metadata
-codec
-fps                  # average; phone video is often variable frame rate
-duration_seconds
+filename               # `original_filename`: display metadata, never a path
+width                  # display orientation, after rotation is applied
+height                 # display orientation
+rotation_degrees       # the container's rotation tag: 0 / 90 / 180 / 270
+codec                  # FourCC; nullable even once decoded
+average_fps            # an average: phone video is often variable frame rate
+duration_seconds       # frame_count / average_fps, so an estimate
 frame_count
+metadata_extracted_at  # null until decoded; the decoded fields arrive together
 created_at
 ```
 
 Because phone video is often variable frame rate, derive timestamps from decoded frame timestamps, not `frame_number / fps`.
+
+Implemented as nullable columns, because rows uploaded before extraction
+existed were never decoded. They are null until a worker decodes the video and
+are never zero-filled on failure. CHECK constraints require positive
+dimensions and frame rate, a non-negative duration and frame count, a
+right-angle rotation, and that the decoded fields are all present or all
+absent (`codec` excepted). The worker writes them in the same transaction as
+the job's `ready` transition.
+
+`width` and `height` are in display orientation because that is what the
+decoder produces: OpenCV applies the rotation tag and returns rotated frames, so
+every image coordinate the pipeline records is a display-orientation pixel.
 
 ## ProcessingJob
 
@@ -84,6 +97,7 @@ id
 match_id
 stage                # INGESTED / METADATA_READY / COURT_READY / ...
 status               # queued / running / ready / failed (ready = this job finished, not the match)
+                     # at most one queued or running job per match (partial unique index)
 progress
 model_run_id         # nullable; model details live in ModelRun
 error_code           # stable, machine-readable reason for a failure
