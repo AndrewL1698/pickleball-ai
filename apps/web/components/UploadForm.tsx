@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useId, useRef, useState } from "react";
-import { ApiError, uploadVideo } from "@/lib/api";
+import { ApiError, createMatch } from "@/lib/api";
 import {
   ACCEPTED_EXTENSIONS,
   ACCEPT_ATTRIBUTE,
@@ -10,7 +10,7 @@ import {
   formatBytes,
   validateVideoFile,
 } from "@/lib/files";
-import type { VideoDetail } from "@/lib/types";
+import type { MatchDetail } from "@/lib/types";
 import { Spinner } from "./Spinner";
 
 type Phase = "idle" | "uploading" | "done";
@@ -23,7 +23,7 @@ export function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
-  const [created, setCreated] = useState<VideoDetail | null>(null);
+  const [created, setCreated] = useState<MatchDetail | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -88,8 +88,8 @@ export function UploadForm() {
     setPhase("uploading");
     setProblem(null);
     try {
-      const video = await uploadVideo(file);
-      setCreated(video);
+      const match = await createMatch(file);
+      setCreated(match);
       setPhase("done");
       // Put the keyboard on the result rather than leaving it on a button that
       // has just been replaced.
@@ -117,7 +117,7 @@ export function UploadForm() {
         {isUploading
           ? "Uploading your video. Large files can take several minutes."
           : phase === "done"
-            ? "Upload complete. A processing job was created."
+            ? "Upload complete. A match and its processing job were created."
             : ""}
       </p>
 
@@ -192,13 +192,13 @@ export function UploadForm() {
             Upload complete
           </h2>
           <p className="mt-1 text-sm text-muted">
-            {created.original_filename} was stored and a processing job was created.
+            {`${created.video?.original_filename ?? "The video"} was stored as the match “${created.name}”, and a processing job was created.`}
           </p>
           <Link
-            href={`/videos/${created.id}`}
+            href={`/matches/${created.id}`}
             className="focus-ring mt-3 inline-flex min-h-11 items-center rounded-lg border border-border-subtle px-4 font-medium"
           >
-            View processing status
+            View match status
           </Link>
         </div>
       ) : null}
@@ -209,14 +209,14 @@ export function UploadForm() {
 /**
  * The sentence to show for a failed upload.
  *
- * The 503 is the interesting one: the video really was stored and really does
- * exist in the list, and only the queueing failed. Calling that "upload
+ * The 503 is the interesting one: the video really was stored, the match
+ * really does exist in the list, and only the queueing failed. Calling that "upload
  * failed" would send someone off to upload it a second time.
  */
 function messageFor(cause: unknown): string {
   if (!(cause instanceof ApiError)) return "Something went wrong while uploading. Try again.";
   if (cause.status === 503) {
-    return "Your video was saved, but it could not be queued for processing. It appears in Videos with a failed job.";
+    return "Your video was saved as a match, but it could not be queued for processing. It appears in Matches marked as failed.";
   }
   if (cause.status === 507) {
     return "The server does not have enough free space for this upload right now.";

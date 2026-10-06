@@ -166,7 +166,8 @@ Carried into later phases:
 - Real video metadata extraction in the worker
   (`pickleball_ml.video.reader.read_metadata`), replacing the placeholder.
 - A `Match` entity, so calibrations, players and rallies have an owner. Until
-  then the UI deliberately says "Videos", never "Matches".
+  then the UI deliberately says "Videos", never "Matches". (Done in Phase 2
+  checkpoint 1.)
 - Serving uploaded video back to the browser for playback, which needs its own
   decisions about origin and content headers.
 - No reaper for a job whose worker was killed, and no retry endpoint, so the
@@ -190,6 +191,35 @@ without them (see `docs/BACKEND.md`):
   (`pickleball_ml.video.reader.read_metadata`), replacing the placeholder
 - secure playback of the uploaded video, so a landmark can be clicked on a
   frame — served from an origin that is not the app's own
+
+Status (2026-09-24): checkpoint 1 done - the `Match` ownership model. A
+`matches` table (name, `recorded_at`, status, `created_at`) owns one `Video`
+(`videos.match_id`, unique) and every `AnalysisJob` (`analysis_jobs.match_id`,
+replacing `video_id`). Migration `0003_match_ownership` carries Phase 1 rows
+over, one match per video with the video's id, and has a tested downgrade on
+SQLite and PostgreSQL. `Match.status` uses an explicit vocabulary —
+`uploaded`, `processing`, `calibration_required`, `court_ready`, `failed` —
+with no generic "ready"; a finished placeholder job leaves a match
+`calibration_required`, and `court_ready` is reserved for the calibration
+checkpoint. The API is match-oriented (`POST/GET /api/matches`,
+`GET /api/matches/{id}`; `/api/videos` removed), and the web app moved to
+`/matches` and `/matches/:id`, with `/videos` paths redirecting.
+
+Status (2026-09-25): checkpoint 2 done - real video metadata extraction. The
+worker's default processor is now `MetadataProcessor`, which reads width and
+height (in display orientation), rotation, average frame rate, estimated
+duration, frame count and codec with `pickleball_ml.video.reader.read_metadata`
+and returns a typed result; the task layer saves it in the same transaction as
+the job's `ready` transition. Migration `0004_video_metadata` adds nullable,
+CHECK-constrained metadata columns and a partial unique index allowing one
+active job per match, and moves backfilled `calibration_required` matches back to
+`uploaded`, since none was ever decoded. `POST /api/matches/{id}/metadata-jobs`
+retries a failed extraction or extracts metadata for an older match, and the
+match page shows the metadata and offers that action only when it is usable.
+The worker depends on `pickleball-ml` without its `tracking` extra, so its image
+has OpenCV but not torch.
+
+Next: secure playback of the uploaded video, then the calibration UI.
 
 Build:
 

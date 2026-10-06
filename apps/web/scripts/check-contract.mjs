@@ -21,8 +21,9 @@ const base = (process.env.API ?? "http://localhost:8000").replace(/\/+$/, "");
 
 /** Field names declared for one interface in lib/types.ts. */
 function declaredFields(source, interfaceName) {
+  // `\\b`: otherwise `Video` would match `export interface VideoMetadata`.
   const match = source.match(
-    new RegExp(`export interface ${interfaceName}[^{]*\\{([\\s\\S]*?)\\n\\}`),
+    new RegExp(`export interface ${interfaceName}\\b[^{]*\\{([\\s\\S]*?)\\n\\}`),
   );
   if (!match) throw new Error(`lib/types.ts has no interface ${interfaceName}`);
   return new Set(
@@ -62,8 +63,10 @@ const problems = [];
 
 for (const [apiName, typeName] of [
   ["JobRead", "Job"],
-  ["VideoSummary", "VideoSummary"],
-  ["VideoList", "VideoList"],
+  ["VideoRead", "Video"],
+  ["VideoMetadataRead", "VideoMetadata"],
+  ["MatchSummary", "MatchSummary"],
+  ["MatchList", "MatchList"],
 ]) {
   compare(
     typeName,
@@ -73,16 +76,33 @@ for (const [apiName, typeName] of [
   );
 }
 
-// VideoDetail extends VideoSummary, so its own declaration lists only the extra keys.
+// MatchDetail extends MatchSummary, so its own declaration lists only the extra keys.
 compare(
-  "VideoDetail",
-  new Set(Object.keys(components.VideoDetail.properties)),
-  new Set([...declaredFields(source, "VideoSummary"), ...declaredFields(source, "VideoDetail")]),
+  "MatchDetail",
+  new Set(Object.keys(components.MatchDetail.properties)),
+  new Set([...declaredFields(source, "MatchSummary"), ...declaredFields(source, "MatchDetail")]),
   problems,
 );
 
+// The primary collection. A route the client calls that the API does not
+// serve is drift too, and the one a field comparison cannot see.
+for (const path of [
+  "/api/matches",
+  "/api/matches/{match_id}",
+  "/api/matches/{match_id}/metadata-jobs",
+  "/api/jobs/{job_id}",
+]) {
+  if (!(path in schema.paths)) problems.push(`the API does not serve ${path}`);
+}
+
 compare("JobStatus", new Set(components.JobStatus.enum), declaredValues(source, "JOB_STATUSES"), problems);
 compare("JobStage", new Set(components.JobStage.enum), declaredValues(source, "JOB_STAGES"), problems);
+compare(
+  "MatchStatus",
+  new Set(components.MatchStatus.enum),
+  declaredValues(source, "MATCH_STATUSES"),
+  problems,
+);
 
 if (problems.length > 0) {
   console.error("lib/types.ts has drifted from the API:\n");

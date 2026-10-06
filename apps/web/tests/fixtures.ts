@@ -6,11 +6,11 @@
  */
 
 import { type ReactNode, createElement } from "react";
-import type { Job, VideoDetail, VideoSummary } from "@/lib/types";
+import type { Job, MatchDetail, MatchSummary, Video, VideoMetadata } from "@/lib/types";
 
 export const JOB_QUEUED: Job = {
   id: "4fc1f817-fe2d-4279-a0be-87125fd6c733",
-  video_id: "1910ff1c-ff2f-4243-a343-5b7c59a86b12",
+  match_id: "7c0d8e0a-3b5e-4f7e-9a51-2f1f3c9d6b21",
   status: "queued",
   stage: "ingested",
   progress: 0,
@@ -47,18 +47,41 @@ export const JOB_FAILED: Job = {
   finished_at: "2026-09-23T18:00:55.400000Z",
 };
 
-export const VIDEO_SUMMARY: VideoSummary = {
+export const VIDEO: Video = {
   id: "1910ff1c-ff2f-4243-a343-5b7c59a86b12",
   original_filename: "demo.mp4",
   content_type: "video/mp4",
   byte_size: 2418,
   created_at: "2026-09-23T18:00:52.792390Z",
+  metadata: null,
+};
+
+/** A portrait phone clip: stored sideways, tagged 90 degrees, plays 1080x1920. */
+export const VIDEO_METADATA: VideoMetadata = {
+  width: 1080,
+  height: 1920,
+  rotation_degrees: 90,
+  average_fps: 29.97,
+  duration_seconds: 754.2,
+  frame_count: 22603,
+  codec: "hvc1",
+  extracted_at: "2026-09-25T18:40:01.120000Z",
+};
+
+export const MATCH_SUMMARY: MatchSummary = {
+  id: "7c0d8e0a-3b5e-4f7e-9a51-2f1f3c9d6b21",
+  name: "demo",
+  recorded_at: null,
+  status: "uploaded",
+  created_at: "2026-09-23T18:00:52.792390Z",
+  video: VIDEO,
   latest_job: JOB_QUEUED,
 };
 
-export const VIDEO_DETAIL: VideoDetail = {
-  ...VIDEO_SUMMARY,
+export const MATCH_DETAIL: MatchDetail = {
+  ...MATCH_SUMMARY,
   jobs: [JOB_QUEUED],
+  can_extract_metadata: false,
 };
 
 /** A `Response` the way the API sends one. */

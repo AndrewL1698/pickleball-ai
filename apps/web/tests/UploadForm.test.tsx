@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { UploadForm } from "@/components/UploadForm";
 import { MAX_UPLOAD_BYTES } from "@/lib/files";
-import { VIDEO_DETAIL, jsonResponse, videoFile } from "./fixtures";
+import { MATCH_DETAIL, jsonResponse, videoFile } from "./fixtures";
 
 // Async factory: `vi.mock` is hoisted above the imports, so the stub has to
 // be pulled in when the factory runs rather than at module scope.
@@ -79,8 +79,8 @@ describe("file selection", () => {
 });
 
 describe("submitting", () => {
-  it("uploads and offers a link to the new video", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(VIDEO_DETAIL, 201)));
+  it("uploads and offers a link to the new match", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(MATCH_DETAIL, 201)));
     const user = userEvent.setup();
     render(<UploadForm />);
 
@@ -88,12 +88,13 @@ describe("submitting", () => {
     await user.click(screen.getByRole("button", { name: /upload video/i }));
 
     expect(await screen.findByRole("heading", { name: /upload complete/i })).toBeInTheDocument();
-    const link = screen.getByRole("link", { name: /view processing status/i });
-    expect(link).toHaveAttribute("href", `/videos/${VIDEO_DETAIL.id}`);
+    const link = screen.getByRole("link", { name: /view match status/i });
+    expect(link).toHaveAttribute("href", `/matches/${MATCH_DETAIL.id}`);
+    expect(screen.getByText(/stored as the match “demo”/)).toBeInTheDocument();
   });
 
   it("announces progress and completion through a live region", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(VIDEO_DETAIL, 201)));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(MATCH_DETAIL, 201)));
     const user = userEvent.setup();
     const { container } = render(<UploadForm />);
 
@@ -127,7 +128,7 @@ describe("submitting", () => {
     await user.click(uploading);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    resolve(jsonResponse(VIDEO_DETAIL, 201));
+    resolve(jsonResponse(MATCH_DETAIL, 201));
     await screen.findByRole("heading", { name: /upload complete/i });
   });
 
@@ -160,7 +161,11 @@ describe("submitting", () => {
       "fetch",
       vi.fn(async () =>
         jsonResponse(
-          { error_code: "dependency_unavailable", detail: "The video was stored but could not be queued for processing." },
+          {
+            error_code: "dependency_unavailable",
+            detail:
+              "The match was created and its video stored, but it could not be queued for processing.",
+          },
           503,
         ),
       ),
@@ -174,6 +179,7 @@ describe("submitting", () => {
     const message = await screen.findByText(/your video was saved/i);
     expect(message).toBeInTheDocument();
     expect(message.textContent).toMatch(/could not be queued/i);
+    expect(message.textContent).toMatch(/Matches/);
   });
 
   it("reports an unreachable API in plain words", async () => {

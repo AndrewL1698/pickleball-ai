@@ -53,15 +53,19 @@ through a background processing job, in the browser.
   natively or with `docker compose --profile app`, with migrations applied by
   the stack rather than by hand.
 
-The processing itself is a **placeholder**: it fingerprints the uploaded file
-rather than analysing it, so the plumbing could be finished before the
-expensive computer vision is wired in. No video is decoded, and there is no
-`Match` entity — the app says "Videos" because that is what it stores. The web
-app states this on the page rather than presenting a finished-looking result.
+Phase 2 (court calibration) is in progress:
 
-Phase 2 (court calibration) is next, and has to introduce the `Match`
-ownership model, real metadata extraction and secure video playback before the
-calibration UI itself. See `docs/ROADMAP.md`.
+- Checkpoint 1: a `Match` owns each uploaded video and every processing job,
+  and the API and web app are organised around matches (`/api/matches`,
+  `/matches`).
+- Checkpoint 2: the worker decodes each video's **metadata** -- resolution in
+  display orientation, rotation, average frame rate, estimated duration, frame
+  count, codec -- and the match page shows it. A match whose metadata is
+  extracted is `calibration_required`, never "ready".
+
+Processing does nothing more than that yet: no frame is analysed and no model
+is loaded, and the web app says so on the page. Secure video playback comes
+next, then the calibration UI. See `docs/ROADMAP.md`.
 
 ## Development Setup
 
@@ -101,7 +105,7 @@ published weights from [WASB-SBDT](https://github.com/nttcom/WASB-SBDT)):
 uvx gdown 14AeyIOCQ2UaQmbZLNQJa1H_eSwxUXk7z -O weights/wasb/wasb_tennis_best.pth.tar
 ```
 
-## Running the Backend (Phase 1)
+## Running the Backend
 
 The API and the worker are Python packages in the same uv workspace as `ml/`:
 `apps/api` (`pickleball_api`) and `workers/video_processor` (`pickleball_worker`).
@@ -122,28 +126,52 @@ uv run pbapi                      # http://127.0.0.1:8000, --reload while develo
 uv run pbworker                   # consumes the analysis queue; --burst to exit when empty
 ```
 
-Upload a video and watch the job run:
+Upload a match's video and watch the job run:
 
 ```bash
 curl -s http://127.0.0.1:8000/health
 curl -s http://127.0.0.1:8000/ready
 
-# Upload any mp4/mov/m4v. Returns the video, its id, and the job created for it.
-curl -s -X POST http://127.0.0.1:8000/api/videos -F "file=@/path/to/your/match.mp4"
+# Upload any mp4/mov/m4v. Creates a match named after the file, and returns
+# the match, its video, and the job created for it.
+curl -s -X POST http://127.0.0.1:8000/api/matches -F "file=@/path/to/your/match.mp4"
 
-curl -s http://127.0.0.1:8000/api/videos
-curl -s http://127.0.0.1:8000/api/videos/<video_id>
+curl -s http://127.0.0.1:8000/api/matches
+curl -s http://127.0.0.1:8000/api/matches/<match_id>
 curl -s http://127.0.0.1:8000/api/jobs/<job_id>
 ```
 
 The job moves `queued -> running -> ready`, or `-> failed` with a code and a
-short message. Interactive API docs are at http://127.0.0.1:8000/docs.
+short message, and the match moves `uploaded -> processing ->
+calibration_required` (or `failed`) with it. On success the match's
+`video.metadata` holds the decoded values; on failure it stays null. A file
+must really decode: bytes that merely start like an mp4 are accepted by the
+upload and then fail with `unreadable_video`. Interactive API docs are at
+http://127.0.0.1:8000/docs.
+
+Retry a failed extraction, or extract metadata for a match uploaded before this
+existed (answers `409` if metadata exists or a job is already active):
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/matches/<match_id>/metadata-jobs
+```
+
+Upgrading an existing database: `alembic upgrade head` applies migration 0003,
+which turns each Phase 1 video into a match with the same id and keeps every
+job, and 0004, which adds the metadata columns. Those older matches have no
+metadata and nothing is queued for them automatically: use the endpoint above,
+or the **Extract metadata** button on the match page. The old `/api/videos`
+endpoints are gone; the web app redirects `/videos` links to `/matches`.
+
+The worker imports OpenCV (through `pickleball_ml.video`) but not torch: the
+worker depends on `pickleball-ml` without its `tracking` extra. `uv sync` at the
+root still installs everything, extra included, for the Phase 0 CLI.
 
 Uploads are written to `data/uploads/` (gitignored) under a generated key, never
 under the uploaded filename. Every environment variable, the full endpoint list,
 the migration commands and the current limitations are in `docs/BACKEND.md`.
 
-## Running the Frontend (Phase 1)
+## Running the Frontend
 
 The web app is a Next.js application in `apps/web`. It is a browser client for
 the API above, so start the backend first.
@@ -155,9 +183,12 @@ cp .env.example .env.local      # defaults already point at a local API
 npm run dev                     # http://localhost:3000
 ```
 
-Three pages: upload a video, see everything uploaded, and follow one video's
-processing job. The job page polls while the job is queued or running and stops
-once it is ready or failed.
+Three pages: upload a match, see every match, and follow one match's status,
+processing job and decoded video metadata. The match page polls while the job is
+queued or running and stops once it is ready or failed. When a match has no
+metadata and nothing is running -- a failed attempt, or a match from before
+extraction existed -- it offers **Try again** or **Extract metadata**. Old
+`/videos` links redirect to `/matches`.
 
 Without `uv run pbworker` running, an upload stays `queued` for ever: nothing
 else consumes the queue. The page says as much.

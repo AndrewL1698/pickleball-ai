@@ -10,8 +10,8 @@
 import type {
   ApiErrorBody,
   Job,
-  VideoDetail,
-  VideoList,
+  MatchDetail,
+  MatchList,
 } from "./types";
 
 /**
@@ -100,12 +100,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
-export function listVideos(signal?: AbortSignal): Promise<VideoList> {
-  return request<VideoList>("/api/videos", { signal, cache: "no-store" });
+export function listMatches(signal?: AbortSignal): Promise<MatchList> {
+  return request<MatchList>("/api/matches", { signal, cache: "no-store" });
 }
 
-export function getVideo(videoId: string, signal?: AbortSignal): Promise<VideoDetail> {
-  return request<VideoDetail>(`/api/videos/${encodeURIComponent(videoId)}`, {
+export function getMatch(matchId: string, signal?: AbortSignal): Promise<MatchDetail> {
+  return request<MatchDetail>(`/api/matches/${encodeURIComponent(matchId)}`, {
     signal,
     cache: "no-store",
   });
@@ -119,15 +119,29 @@ export function getJob(jobId: string, signal?: AbortSignal): Promise<Job> {
 }
 
 /**
- * Upload one video. The field name must be `file`: it is what the API's
- * multipart parameter is called.
+ * Queue a metadata extraction job for a match whose metadata is absent --
+ * after a failure, or for a match that predates extraction. The API answers
+ * 409 when it already has metadata or a job is active, and 503 when the job
+ * was recorded but could not be queued.
  */
-export function uploadVideo(file: File, signal?: AbortSignal): Promise<VideoDetail> {
+export function startMetadataJob(matchId: string, signal?: AbortSignal): Promise<MatchDetail> {
+  // No body and no headers, so this stays a CORS simple request.
+  return request<MatchDetail>(`/api/matches/${encodeURIComponent(matchId)}/metadata-jobs`, {
+    method: "POST",
+    signal,
+  });
+}
+
+/**
+ * Create a match by uploading its video. The field name must be `file`: it is
+ * what the API's multipart parameter is called.
+ */
+export function createMatch(file: File, signal?: AbortSignal): Promise<MatchDetail> {
   const form = new FormData();
   form.append("file", file);
   // Content-Type is deliberately not set: the browser has to add the multipart
   // boundary itself, and setting it by hand produces a body the server cannot
   // parse. multipart/form-data is also CORS-safelisted, so this stays a simple
   // request with no preflight.
-  return request<VideoDetail>("/api/videos", { method: "POST", body: form, signal });
+  return request<MatchDetail>("/api/matches", { method: "POST", body: form, signal });
 }

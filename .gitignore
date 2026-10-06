@@ -48,6 +48,10 @@ venv/
 htmlcov/
 .ipynb_checkpoints/
 
+# --- Local tooling ---
+# Generated code walkthroughs; not part of the project.
+.walkthroughs/
+
 # --- Node / Next.js ---
 node_modules/
 .next/

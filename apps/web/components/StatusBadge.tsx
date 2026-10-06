@@ -1,5 +1,5 @@
-import type { JobStatus } from "@/lib/types";
-import { STATUS_COPY } from "@/lib/status";
+import type { JobStatus, MatchStatus } from "@/lib/types";
+import { MATCH_STATUS_COPY, STATUS_COPY } from "@/lib/status";
 
 /**
  * Colour is never the only signal: every badge carries its word, and a glyph
@@ -30,17 +30,55 @@ const STYLES: Record<JobStatus, { glyph: string; className: string }> = {
   },
 };
 
+const MATCH_STYLES: Record<MatchStatus, { glyph: string; className: string }> = {
+  uploaded: STYLES.queued,
+  processing: STYLES.running,
+  // Amber, not green: this is a step still to do, not a finished result.
+  calibration_required: {
+    glyph: "◇",
+    className:
+      "bg-amber-50 text-amber-800 ring-amber-700/25 dark:bg-amber-400/15 dark:text-amber-100 dark:ring-amber-400/30",
+  },
+  court_ready: STYLES.ready,
+  failed: STYLES.failed,
+};
+
+/** A job's status. */
 export function StatusBadge({ status }: { status: JobStatus }) {
-  const { glyph, className } = STYLES[status];
+  return <Badge testId="status-badge" {...STYLES[status]} label={STATUS_COPY[status].label} />;
+}
+
+/** A match's status: the summary shown in lists and page headers. */
+export function MatchStatusBadge({ status }: { status: MatchStatus }) {
+  return (
+    <Badge
+      testId="match-status-badge"
+      {...MATCH_STYLES[status]}
+      label={MATCH_STATUS_COPY[status].label}
+    />
+  );
+}
+
+function Badge({
+  testId,
+  glyph,
+  className,
+  label,
+}: {
+  testId: string;
+  glyph: string;
+  className: string;
+  label: string;
+}) {
   return (
     <span
-      data-testid="status-badge"
+      data-testid={testId}
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${className}`}
     >
       <span aria-hidden="true" className="leading-none">
         {glyph}
       </span>
-      {STATUS_COPY[status].label}
+      {label}
     </span>
   );
 }

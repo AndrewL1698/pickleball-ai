@@ -2,23 +2,23 @@
 
 import Link from "next/link";
 import { useCallback } from "react";
-import { type ApiError, listVideos } from "@/lib/api";
+import { type ApiError, listMatches } from "@/lib/api";
 import { formatBytes } from "@/lib/files";
 import { formatTimestamp } from "@/lib/format";
-import type { VideoList } from "@/lib/types";
+import type { MatchList } from "@/lib/types";
 import { usePolledResource } from "@/hooks/usePolledResource";
 import { Notice } from "./Notice";
 import { RefreshButton } from "./RefreshButton";
 import { Spinner } from "./Spinner";
-import { StatusBadge } from "./StatusBadge";
+import { MatchStatusBadge } from "./StatusBadge";
 
-export function VideoListView() {
-  const fetcher = useCallback((signal: AbortSignal) => listVideos(signal), []);
+export function MatchListView() {
+  const fetcher = useCallback((signal: AbortSignal) => listMatches(signal), []);
   // No `shouldContinue`, so the hook fetches once and stops. The list wants
   // everything else it provides: cancellation on unmount, the keep-the-last-
   // value error handling, and a manual retry.
   const { data, error, isLoading, isRefreshing, refresh } =
-    usePolledResource<VideoList>(fetcher, {});
+    usePolledResource<MatchList>(fetcher, {});
 
   return (
     <>
@@ -28,7 +28,7 @@ export function VideoListView() {
         first message is frequently not announced.
       */}
       <p role="status" className="sr-only">
-        {announcement(isLoading, error, data?.videos.length)}
+        {announcement(isLoading, error, data?.matches.length)}
       </p>
       <Body
         data={data}
@@ -48,7 +48,7 @@ function Body({
   isRefreshing,
   refresh,
 }: {
-  data: VideoList | null;
+  data: MatchList | null;
   error: ApiError | null;
   isLoading: boolean;
   isRefreshing: boolean;
@@ -58,7 +58,7 @@ function Body({
     return (
       <p className="flex items-center gap-2 text-muted">
         <Spinner />
-        Loading your videos…
+        Loading your matches…
       </p>
     );
   }
@@ -69,7 +69,7 @@ function Body({
         <Notice
           tone="error"
           role="alert"
-          title="We could not load your videos."
+          title="We could not load your matches."
           code={error?.code}
         >
           <p>{error?.message ?? "Something went wrong."}</p>
@@ -79,17 +79,19 @@ function Body({
     );
   }
 
-  if (data.videos.length === 0) {
+  if (data.matches.length === 0) {
     // Neutral, not an error: an empty list is what a new install looks like.
     return (
       <div className="rounded-lg border border-border-subtle bg-surface p-6 text-center">
-        <h2 className="font-semibold">No videos yet</h2>
-        <p className="mt-1 text-sm text-muted">Upload a match recording to get started.</p>
+        <h2 className="font-semibold">No matches yet</h2>
+        <p className="mt-1 text-sm text-muted">
+          Upload a match recording to create your first match.
+        </p>
         <Link
           href="/"
           className="focus-ring mt-4 inline-flex min-h-11 items-center rounded-lg bg-accent px-4 font-medium text-background"
         >
-          Upload a video
+          Upload a match
         </Link>
       </div>
     );
@@ -97,9 +99,9 @@ function Body({
 
   return (
     <ul className="space-y-3">
-      {data.videos.map((video) => (
+      {data.matches.map((match) => (
         <li
-          key={video.id}
+          key={match.id}
           className="relative isolate rounded-lg border border-border-subtle p-4 md:grid md:grid-cols-[1fr_auto] md:items-center md:gap-4"
         >
           <div className="min-w-0">
@@ -108,27 +110,32 @@ function Body({
                 A link, not a clickable row: navigation has to work with the
                 keyboard, and people expect to open it in a new tab. The
                 stretched ::after makes the whole card clickable while leaving
-                exactly one tab stop, named after the file.
+                exactly one tab stop, named after the match.
               */}
               <Link
-                href={`/videos/${video.id}`}
+                href={`/matches/${match.id}`}
                 className="focus-ring rounded-sm after:absolute after:inset-0 after:rounded-lg"
               >
-                {video.original_filename}
+                {match.name}
               </Link>
             </h2>
             <p className="mt-1 text-sm text-muted">
-              <time dateTime={video.created_at}>{formatTimestamp(video.created_at)}</time>
-              {" · "}
-              {formatBytes(video.byte_size)}
+              <time dateTime={match.created_at}>{formatTimestamp(match.created_at)}</time>
+              {match.video ? (
+                <>
+                  {" · "}
+                  <span className="break-all">{match.video.original_filename}</span>
+                  {" · "}
+                  {formatBytes(match.video.byte_size)}
+                </>
+              ) : (
+                " · No video"
+              )}
             </p>
           </div>
           <div className="mt-2 md:mt-0">
-            {video.latest_job ? (
-              <StatusBadge status={video.latest_job.status} />
-            ) : (
-              <span className="text-sm text-muted">No job</span>
-            )}
+            {/* The match status, not the job's: it is the summary a person acts on. */}
+            <MatchStatusBadge status={match.status} />
           </div>
         </li>
       ))}
@@ -142,8 +149,8 @@ function announcement(
   error: ApiError | null,
   count: number | undefined,
 ): string {
-  if (isLoading) return "Loading videos.";
-  if (error !== null || count === undefined) return "Could not load your videos.";
-  if (count === 0) return "No videos yet.";
-  return `${count} ${count === 1 ? "video" : "videos"} loaded.`;
+  if (isLoading) return "Loading matches.";
+  if (error !== null || count === undefined) return "Could not load your matches.";
+  if (count === 0) return "No matches yet.";
+  return `${count} ${count === 1 ? "match" : "matches"} loaded.`;
 }

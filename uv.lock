@@ -904,7 +904,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "pickleball-api" },
-    { name = "pickleball-ml" },
+    { name = "pickleball-ml", extra = ["tracking"] },
     { name = "pickleball-worker" },
 ]
 
@@ -923,7 +923,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pickleball-api", editable = "apps/api" },
-    { name = "pickleball-ml", editable = "ml" },
+    { name = "pickleball-ml", extras = ["tracking"], editable = "ml" },
     { name = "pickleball-worker", editable = "workers/video_processor" },
 ]
 
@@ -975,27 +975,32 @@ name = "pickleball-ml"
 version = "0.1.0"
 source = { editable = "ml" }
 dependencies = [
-    { name = "lap" },
     { name = "networkx" },
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "pyyaml" },
+]
+
+[package.optional-dependencies]
+tracking = [
+    { name = "lap" },
     { name = "ultralytics" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "lap", specifier = ">=0.5" },
+    { name = "lap", marker = "extra == 'tracking'", specifier = ">=0.5" },
     { name = "networkx", specifier = ">=3.3" },
     { name = "numpy", specifier = ">=2" },
     { name = "opencv-python", specifier = ">=4.10" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "pyarrow", specifier = ">=18" },
     { name = "pyyaml", specifier = ">=6" },
-    { name = "ultralytics", specifier = ">=8.3" },
+    { name = "ultralytics", marker = "extra == 'tracking'", specifier = ">=8.3" },
 ]
+provides-extras = ["tracking"]
 
 [[package]]
 name = "pickleball-worker"
@@ -1003,12 +1008,14 @@ version = "0.1.0"
 source = { editable = "workers/video_processor" }
 dependencies = [
     { name = "pickleball-api" },
+    { name = "pickleball-ml" },
     { name = "rq" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pickleball-api", editable = "apps/api" },
+    { name = "pickleball-ml", editable = "ml" },
     { name = "rq", specifier = ">=2" },
 ]
 

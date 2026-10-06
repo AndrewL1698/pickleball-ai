@@ -18,7 +18,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pickleball_api.config import Settings, get_settings
 from pickleball_api.limits import limit_upload_size
 from pickleball_api.queue import RedisJobQueue
-from pickleball_api.routers import health, jobs, videos
+from pickleball_api.routers import health, jobs, matches
 from pickleball_api.schemas import ErrorResponse
 from pickleball_api.storage import LocalFileStorage
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 TITLE = "Pickleball Match Intelligence API"
 
 #: Bumped when a response shape changes incompatibly.
-API_VERSION = "0.1.0"
+API_VERSION = "0.2.0"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -74,7 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(health.router)
-    app.include_router(videos.router)
+    app.include_router(matches.router)
     app.include_router(jobs.router)
 
     @app.exception_handler(StarletteHTTPException)
@@ -104,6 +104,7 @@ _STATUS_CODES = {
     400: "bad_request",
     404: "not_found",
     405: "method_not_allowed",
+    409: "conflict",
     413: "upload_too_large",
     415: "unsupported_file_type",
     503: "dependency_unavailable",
