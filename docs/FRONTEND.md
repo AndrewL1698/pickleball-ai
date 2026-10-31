@@ -321,8 +321,9 @@ one of them once on a clean checkout.
   count of all rows. Past 100 matches the oldest simply do not appear.
 - **No renaming.** A match keeps its filename-derived name; the API has no
   endpoint to change it or to set `recorded_at`.
-- **No retry for a failed job**, because the API exposes no endpoint for it.
+- **Retry is limited to extraction that never succeeded.** **Try again** starts a new job;
+  once metadata exists there is no way to extract it again.
 - **No delete, no playback, no authentication**, matching the backend.
 - **No browser-driven test.** The live suite drives the real components against
   the real API in jsdom, which covers the data flow, but nothing here has
-  clicked the real drop zone in a real browser. Checkpoint 3 should add that.
+  clicked the real drop zone in a real browser.

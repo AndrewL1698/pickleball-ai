@@ -101,10 +101,10 @@ class MetadataJobRefusal(enum.StrEnum):
 class JobStage(enum.StrEnum):
     """Pipeline stage a job has reached.
 
-    The names follow the stage sequence in `docs/ARCHITECTURE.md`. Checkpoint 1
-    only reaches `METADATA_READY`, because the processor is a placeholder; the
-    later stages are listed so the column's meaning does not change when the
-    real computer-vision stages are wired in.
+    The names follow the stage sequence in `docs/ARCHITECTURE.md`. Jobs only
+    reach `METADATA_READY` today, because reading the video is all the worker
+    does; the later stages are listed so the column's meaning does not change
+    when the real computer-vision stages are wired in.
     """
 
     INGESTED = "ingested"

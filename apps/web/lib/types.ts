@@ -29,9 +29,9 @@ export const JOB_STATUSES = ["queued", "running", "ready", "failed"] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
 /**
- * Pipeline stage a job has reached, from docs/ARCHITECTURE.md. The placeholder
- * processor only ever reaches `metadata_ready`; the rest exist so the field
- * does not change meaning when the real stages land.
+ * Pipeline stage a job has reached, from docs/ARCHITECTURE.md. Jobs only reach
+ * `metadata_ready` today; the rest exist so the field does not change meaning
+ * when the real stages land.
  */
 export const JOB_STAGES = [
   "ingested",

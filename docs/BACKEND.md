@@ -31,7 +31,7 @@ apps/api/                              # package `pickleball_api`
 ├── Dockerfile                         # shared by the api and worker compose services
 ├── migrations/
 │   ├── env.py                         # reads the URL from settings unless given one
-│   └── versions/                      # 0001 the tables, 0002 enum CHECKs, 0003 matches
+│   └── versions/                      # 0001 the tables, 0002 enum CHECKs, 0003 matches, 0004 metadata
 ├── src/pickleball_api/
 │   ├── config.py                      # typed settings, and the extension allowlist
 │   ├── db.py                          # engine, session factory, request/worker sessions
@@ -52,7 +52,7 @@ apps/api/                              # package `pickleball_api`
 
 workers/video_processor/               # package `pickleball_worker`
 ├── src/pickleball_worker/
-│   ├── processors.py                  # VideoProcessor interface + PlaceholderProcessor
+│   ├── processors.py                  # VideoProcessor interface + MetadataProcessor
 │   ├── tasks.py                       # the RQ task and its transaction boundaries
 │   └── __main__.py                    # `pbworker`
 └── tests/

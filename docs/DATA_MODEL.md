@@ -2,7 +2,7 @@
 
 This document gives a conceptual schema. Exact implementation may evolve.
 
-Implementation status (Phase 2 checkpoint 1): three of these tables exist.
+Implementation status (Phase 2 checkpoint 2): three of these tables exist.
 
 | Here | In the database today |
 |---|---|

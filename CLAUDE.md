@@ -532,6 +532,8 @@ When assisting with this repository:
 
 ## Immediate Milestone
 
+The current milestone is whichever phase `docs/ROADMAP.md` marks as in progress. The CV prototype below is finished (Phase 0a), and its shape is kept because later CLI stages still follow it:
+
 Build an end-to-end prototype for one known test video:
 
 Video -> manual court calibration -> player tracks -> homography -> animated top-down court.
