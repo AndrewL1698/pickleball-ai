@@ -1,5 +1,7 @@
 """Planar homography between image pixels and court coordinates."""
 
+from itertools import combinations
+
 import cv2
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -24,6 +26,8 @@ def fit_homography(image_points: ArrayLike, court_points: ArrayLike) -> FloatArr
         raise CalibrationError(f"need at least 4 points, got {len(img)}")
     if _all_collinear(court) or _all_collinear(img):
         raise CalibrationError("points are collinear")
+    if _one_point_off_a_line(court):
+        raise CalibrationError("all but one of the points are collinear")
 
     homography, _ = cv2.findHomography(img, court, method=0)
     if homography is None:
@@ -60,6 +64,21 @@ def _as_points(points: ArrayLike) -> FloatArray:
     if arr.ndim != 2 or arr.shape[1] != 2:
         raise CalibrationError(f"expected (N, 2) points, got shape {arr.shape}")
     return arr
+
+
+def _one_point_off_a_line(points: FloatArray) -> bool:
+    """True when some line holds all the points but one, which leaves the fit underdetermined.
+
+    Separate from `_all_collinear` because this needs a pair to define each line.
+    """
+    for a, b in combinations(points, 2):
+        offsets = points - a
+        direction = b - a
+        cross = offsets[:, 0] * direction[1] - offsets[:, 1] * direction[0]
+        scale = max(float(np.linalg.norm(direction)), 1.0)
+        if np.count_nonzero(np.abs(cross) <= 1e-6 * scale) >= len(points) - 1:
+            return True
+    return False
 
 
 def _all_collinear(points: FloatArray) -> bool:

@@ -10,7 +10,7 @@ display-orientation pixel. `rotation_degrees` records the tag that was applied.
 """
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -188,6 +188,37 @@ def read_frame(path: Path, frame_number: int) -> Frame:
     for _, _, image in iter_frames(path, start_frame=frame_number, end_frame=frame_number + 1):
         return image
     raise ValueError(f"frame {frame_number} is beyond the end of {path}")
+
+
+def sample_frames(path: Path, seconds: Iterable[float]) -> Iterator[tuple[float, Frame]]:
+    """Frames at about these times, as (requested seconds, image), by seeking.
+
+    Fast, but the position is approximate: good enough for a still to look at or
+    a quality check, not for anything that has to name an exact frame. A time
+    that cannot be decoded is skipped.
+    """
+    cap = _open(path)
+    try:
+        for second in seconds:
+            cap.set(cv2.CAP_PROP_POS_MSEC, float(second) * 1000.0)
+            ok, image = cap.read()
+            if ok:
+                yield float(second), cast(Frame, image)
+    finally:
+        cap.release()
+
+
+def median_background(frames: list[Frame]) -> Frame:
+    """Per-pixel median of frames: removes moving players so court lines are unobstructed."""
+    return cast(Frame, np.median(np.stack(frames), axis=0).astype(np.uint8))
+
+
+def encode_jpeg(image: Frame, quality: int = 90) -> bytes:
+    """A frame as JPEG bytes."""
+    ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    if not ok:
+        raise VideoReadError("could not encode a frame as JPEG")
+    return bytes(encoded.tobytes())
 
 
 def _open(path: Path) -> cv2.VideoCapture:

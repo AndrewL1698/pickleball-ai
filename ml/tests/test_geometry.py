@@ -77,6 +77,14 @@ def test_fit_rejects_mismatched_lengths() -> None:
         fit_homography(image_points()[:5], court_points()[:6])
 
 
+def test_fit_rejects_all_but_one_point_on_a_line() -> None:
+    """Three on a baseline and one elsewhere leaves the homography underdetermined."""
+    court = np.array([(-10.0, -22.0), (0.0, -22.0), (10.0, -22.0), (0.0, -7.0)])
+    image = apply_homography(COURT_TO_IMAGE, court)
+    with pytest.raises(CalibrationError, match="collinear"):
+        fit_homography(image, court)
+
+
 def test_fit_rejects_collinear_points() -> None:
     baseline = [0, 1, 2]
     pts = court_points()[baseline]

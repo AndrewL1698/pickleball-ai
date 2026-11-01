@@ -1,6 +1,7 @@
 import math
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
@@ -8,12 +9,15 @@ from pickleball_ml.video.fixtures import write_test_video
 from pickleball_ml.video.reader import (
     InvalidVideoMetadata,
     VideoReadError,
+    encode_jpeg,
     fourcc_to_codec,
     iter_frames,
+    median_background,
     metadata_from_properties,
     normalize_rotation,
     read_frame,
     read_metadata,
+    sample_frames,
 )
 
 FPS = 10
@@ -161,3 +165,34 @@ def test_fixture_frames_are_deterministic(tmp_path: Path) -> None:
     second = write_test_video(tmp_path / "b.mp4")
     assert first.read_bytes() == second.read_bytes()
     assert np.array_equal(read_frame(first, 3), read_frame(second, 3))
+
+
+def test_sample_frames_returns_the_requested_times_nearest_frames(video: Path) -> None:
+    sampled = list(sample_frames(video, [0.0, 1.0]))
+    assert [second for second, _ in sampled] == [0.0, 1.0]
+    assert abs(brightness_index(sampled[1][1]) - FPS) <= 1
+
+
+def test_sample_frames_skips_a_time_past_the_end(video: Path) -> None:
+    sampled = list(sample_frames(video, [0.0, 999.0]))
+    assert [second for second, _ in sampled] == [0.0]
+
+
+def test_sample_frames_are_in_display_orientation(tmp_path: Path) -> None:
+    rotated = write_test_video(tmp_path / "rotated.mp4", width=64, height=48, rotation=90)
+    (_, image), *_ = sample_frames(rotated, [0.0])
+    assert image.shape[:2] == (64, 48)
+
+
+def test_median_background_removes_what_only_some_frames_show() -> None:
+    court = np.full((4, 4, 3), 100, dtype=np.uint8)
+    player = court.copy()
+    player[1, 1] = 255
+    assert np.array_equal(median_background([court, player, court]), court)
+
+
+def test_encode_jpeg_round_trips_the_image_size() -> None:
+    image = np.full((48, 64, 3), 128, dtype=np.uint8)
+    decoded = cv2.imdecode(np.frombuffer(encode_jpeg(image), np.uint8), cv2.IMREAD_COLOR)
+    assert decoded.shape == image.shape
+

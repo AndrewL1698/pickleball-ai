@@ -19,7 +19,7 @@ blur/detail proxy. Only comparable between videos of the same resolution.
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import cv2
 import numpy as np
@@ -27,7 +27,7 @@ import numpy as np
 from pickleball_ml.court.calibration import Calibration
 from pickleball_ml.court.geometry import FloatArray, apply_homography
 from pickleball_ml.court.spec import HALF_LENGTH_FT, HALF_WIDTH_FT, LANDMARKS
-from pickleball_ml.video.reader import Frame
+from pickleball_ml.video.reader import Frame, sample_frames
 
 MIN_PLAUSIBLE_HFOV_DEG = 20.0
 MAX_PLAUSIBLE_HFOV_DEG = 130.0
@@ -241,15 +241,4 @@ def sample_frames_by_time(
 ) -> Iterator[tuple[float, Frame]]:
     """Frames every `step_s` seconds by seeking (fast; approximate frame positions are
     fine for stability and quality checks, not for labels)."""
-    cap = cv2.VideoCapture(str(video))
-    if not cap.isOpened():
-        raise OSError(f"could not open video {video}")
-    try:
-        for t in np.arange(start_s, end_s, step_s):
-            cap.set(cv2.CAP_PROP_POS_MSEC, float(t) * 1000.0)
-            ok, image = cap.read()
-            if not ok:
-                break
-            yield float(t), cast(Frame, image)
-    finally:
-        cap.release()
+    return sample_frames(video, (float(t) for t in np.arange(start_s, end_s, step_s)))

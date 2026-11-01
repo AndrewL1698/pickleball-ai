@@ -1,9 +1,7 @@
 """Interactive OpenCV tool for clicking court landmarks on a video frame."""
 
-from typing import cast
 
 import cv2
-import numpy as np
 
 from pickleball_ml.court.spec import LANDMARKS
 from pickleball_ml.video.reader import Frame
@@ -101,7 +99,3 @@ def _draw_magnifier(canvas: Frame, image: Frame, cursor: tuple[int, int], radius
         canvas[top : top + size, left : left + size] = zoom
         cv2.rectangle(canvas, (left, top), (left + size, top + size), (255, 255, 255), 1)
 
-
-def median_background(frames: list[Frame]) -> Frame:
-    """Per-pixel median of frames: removes moving players so court lines are unobstructed."""
-    return cast(Frame, np.median(np.stack(frames), axis=0).astype(np.uint8))
