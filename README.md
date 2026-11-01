@@ -53,7 +53,7 @@ through a background processing job, in the browser.
   natively or with `docker compose --profile app`, with migrations applied by
   the stack rather than by hand.
 
-Phase 2 (court calibration) is in progress:
+Phase 2 (court calibration) is complete:
 
 - Checkpoint 1: a `Match` owns each uploaded video and every processing job,
   and the API and web app are organised around matches (`/api/matches`,
@@ -62,10 +62,16 @@ Phase 2 (court calibration) is in progress:
   display orientation, rotation, average frame rate, estimated duration, frame
   count, codec -- and the match page shows it. A match whose metadata is
   extracted is `calibration_required`, never "ready".
+- Checkpoint 3: every job also makes **calibration images**, a median of frames
+  with the players removed and three single frames, served by the API.
+- Checkpoint 4: `POST /api/matches/{id}/calibrations` fits a homography to landmarks
+  placed on an image and saves it, refusing what cannot make a court.
+- Checkpoint 5: a **calibration page** to place landmarks and check the result
+  against the painted lines and a top-down court.
 
-Processing does nothing more than that yet: no frame is analysed and no model
-is loaded, and the web app says so on the page. Secure video playback comes
-next, then the calibration UI. See `docs/ROADMAP.md`.
+Processing does nothing more than that yet: nothing in a frame is analysed and no
+model is loaded, and the web app says so on the page. Player tracking in the worker
+(Phase 3) comes next. See `docs/ROADMAP.md`.
 
 ## Development Setup
 
@@ -161,11 +167,15 @@ which turns each Phase 1 video into a match with the same id and keeps every
 job, and 0004, which adds the metadata columns. Those older matches have no
 metadata and nothing is queued for them automatically: use the endpoint above,
 or the **Extract metadata** button on the match page. The old `/api/videos`
-endpoints are gone; the web app redirects `/videos` links to `/matches`.
+endpoints are gone; the web app redirects `/videos` links to `/matches`. Migrations
+0005 and 0006 add calibration images and calibrations. A match that already has
+metadata has no images and nothing is queued for it: use the **Make calibration
+images** button on its page.
 
-The worker imports OpenCV (through `pickleball_ml.video`) but not torch: the
-worker depends on `pickleball-ml` without its `tracking` extra. `uv sync` at the
-root still installs everything, extra included, for the Phase 0 CLI.
+The worker and the API import OpenCV (through `pickleball_ml.video` and
+`pickleball_ml.court.geometry`) but not torch: both depend on `pickleball-ml`
+without its `tracking` extra. `uv sync` at the root still installs everything, extra
+included, for the Phase 0 CLI.
 
 Uploads are written to `data/uploads/` (gitignored) under a generated key, never
 under the uploaded filename. Every environment variable, the full endpoint list,
@@ -183,8 +193,8 @@ cp .env.example .env.local      # defaults already point at a local API
 npm run dev                     # http://localhost:3000
 ```
 
-Three pages: upload a match, see every match, and follow one match's status,
-processing job and decoded video metadata. The match page polls while the job is
+Four pages: upload a match, see every match, follow one match's status, processing
+job and decoded video metadata, and calibrate its court. The match page polls while the job is
 queued or running and stops once it is ready or failed. When a match has no
 metadata and nothing is running -- a failed attempt, or a match from before
 extraction existed -- it offers **Try again** or **Extract metadata**. Old

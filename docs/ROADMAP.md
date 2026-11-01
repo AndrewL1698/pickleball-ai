@@ -169,7 +169,8 @@ Carried into later phases:
   then the UI deliberately says "Videos", never "Matches". (Done in Phase 2
   checkpoint 1.)
 - Serving uploaded video back to the browser for playback, which needs its own
-  decisions about origin and content headers.
+  decisions about origin and content headers. (Moved to Phase 5 by Phase 2
+  checkpoint 3.)
 - No reaper for a job whose worker was killed, and no retry endpoint, so the
   `failed -> queued` transition is unreachable over HTTP.
 - No authentication, so every upload is visible to anyone who can reach the
@@ -183,14 +184,14 @@ Carried into later phases:
 
 Start with manual calibration. Homography math and the CLI tool already exist from Phase 0; this phase brings calibration into the app.
 
-Three prerequisites come first, because the calibration UI cannot be built
+Three prerequisites came first, because the calibration UI cannot be built
 without them (see `docs/BACKEND.md`):
 
 - the `Match` ownership model, so a calibration has something to belong to
 - real video metadata extraction in the worker
   (`pickleball_ml.video.reader.read_metadata`), replacing the placeholder
-- secure playback of the uploaded video, so a landmark can be clicked on a
-  frame — served from an origin that is not the app's own
+- something to click on. This was written as secure playback of the uploaded
+  video, and became generated still images instead (checkpoint 3)
 
 Status (2026-09-24): checkpoint 1 done - the `Match` ownership model. A
 `matches` table (name, `recorded_at`, status, `created_at`) owns one `Video`
@@ -219,14 +220,97 @@ match page shows the metadata and offers that action only when it is usable.
 The worker depends on `pickleball-ml` without its `tracking` extra, so its image
 has OpenCV but not torch.
 
-Next: secure playback of the uploaded video, then the calibration UI.
+Status (2026-10-31): checkpoint 3 done - calibration images. Clicking a landmark
+needs a still, not playback, so every job now also writes stills to storage: the
+median of 25 frames across the video, which removes the players, and three single
+frames for a video whose camera moved. They are decoded by the code the pipeline
+uses, so a pixel on them is a pixel in every later image coordinate, and browser
+support for a phone's codec does not come into it. Because they are JPEGs the
+worker generated, the stored-XSS question about serving uploads does not arise.
+Migration `0005_reference_frames`; a match processed before this queues the job
+with `POST /api/matches/{id}/reference-frame-jobs`.
+
+Video playback moves to Phase 5, where jump-to-rally is the first thing that needs
+it, and takes its open questions about origin and headers with it.
+
+Status (2026-10-31): checkpoint 4 done - calibration persistence and API.
+Migration `0006_court_calibrations`. `POST /api/matches/{id}/calibrations` fits the
+homography in the request and saves it. Calibrations are never updated: a new one
+is a new row and the newest is in force. This changes the documented boundary: the
+API now imports `pickleball_ml.court.geometry` and `court.spec`, so there is one
+homography implementation, with a test that it still loads no model library. A
+fit is refused when left and right are swapped, which no error measure can catch
+because a mirrored court fits just as well. Tested against all six Phase 0
+calibrations, each accepted as placed and refused when swapped.
+
+Status (2026-10-31): checkpoint 5 done - the calibration page and top-down court.
+**Phase 2 passes its exit criterion**, with the caveat below. `/matches/:id/calibrate`
+places landmarks by click, drag or keyboard with a magnifier, shows the errors and
+the projected lines, and puts a clicked point on the top-down court.
+
+Verified in Chrome on the real stack, with the `buzz` clip, by replaying its Phase 0
+landmarks through the page rather than a person placing them fresh:
+
+| Check | Result |
+|---|---|
+| Fit through the page | 0.10 ft mean, 0.20 ft max, against 0.08 and 0.15 for Phase 0 |
+| Projected lines against the painted lines | Sit on them, by eye |
+| Near-left player's shoe, on the near baseline left of center | X -3.9, Y -22.0 |
+| Near-right player's rear shoe, behind the baseline right of center | X 5.3, Y -22.8 |
+| Far player's shoes, at the far kitchen line right of center | X 5.2, Y 8.0 |
+| A point in the sky | Refused as above the horizon |
+| Corner camera (`testclip`), through the API | 0.28 ft mean, 0.66 ft max, equal to Phase 0, overlay fits |
+
+The caveat: the criterion says "in the video", and these clicks are on a still from
+the video. Player positions above were judged against what the frame shows, not
+measured. This fit differs from the Phase 0 one by 0.20 ft on average across the court and
+0.67 ft at worst. The likely cause, not separately measured, is that a click resolves
+to a screen pixel, about 2.1 image pixels at this width, and at the far baseline an
+image pixel is about 0.25 ft. Arrow keys move a landmark by one image pixel, and the
+page says so.
+
+Status (2026-11-01): the first calibration placed by hand through the page, on the
+full `riggs` video, with all 12 landmarks on the background image. It fit at 0.20 ft
+mean and 0.52 ft max, with no warning. Against the two Phase 0 fits for that video,
+over a 1 ft grid of the court:
+
+| Phase 0 fit | Court difference, mean | Court difference, worst | Clicks apart |
+|---|---|---|---|
+| `cam2`, after the camera moved at 6:08 | 1.09 ft | 4.11 ft | 2-10 px (11 shared landmarks) |
+| `cam1`, before the move | 4.01 ft | 10.09 ft | 66-172 px |
+
+The fit follows `cam2`, which is consistent with about 60% of the video coming after
+the move, so the background mostly shows that position. It is therefore about 4 ft out
+for the first six minutes, while its error figures look good. The 1.09 ft is the first
+sign of how far two hand-placed fits can differ. This camera is wide-angle and had the
+worst Phase 0 fit, so it may not carry over to other videos, and which fit is closer to
+the truth is unmeasured.
+
+Carried into later phases:
+
+- A background is unusable when the camera moved mid-video, and one calibration
+  cannot be right on both sides of the move. The page says so, but nothing detects it,
+  and `riggs` above shows a good-looking fit that is wrong for part of the video.
+- Placing 12 landmarks is tedious, and not practical on a phone. Proposed but neither
+  decided nor built: tap the four corners, project the other landmarks, snap them to
+  the painted lines, and confirm. Fully automatic detection stays in Phase 12.
+- The page does not say which part of a painted line to click. The official dimensions
+  are understood to run to the lines' outer edges, not checked against the rulebook. Edge
+  and center differ by about 1 inch.
+- Saving again with nothing changed adds another row: the `riggs` session left three
+  identical rows within 5 seconds. The newest wins, so results are unaffected, and why
+  it was pressed repeatedly is unknown.
+- Reference frames and calibrations have no deletion path, like the rest of a match.
+- The reprojection error measures how well clicks agree, not position accuracy, and
+  the page says that too. Position accuracy in court feet is still unmeasured.
+- Sample positions are approximate because they come from seeking.
 
 Build:
 
-- web UI for clicking court landmarks
-- calibration persistence in the database
-- calibration quality display (reprojection error, court-line overlay)
-- top-down court component
+- ~~web UI for clicking court landmarks~~
+- ~~calibration persistence in the database~~
+- ~~calibration quality display (reprojection error, court-line overlay)~~
+- ~~top-down court component~~
 
 Exit criteria:
 
@@ -235,6 +319,8 @@ Clicking a player's location in the video produces the correct approximate locat
 ---
 
 ## Phase 3 - Player Tracking
+
+Status (2026-11-01): next, not started.
 
 Harden the Phase 0 prototype and move it into the worker.
 
@@ -286,6 +372,9 @@ Build:
 - rally start/end heuristics
 - rally timeline UI
 - manual split/merge controls
+- secure playback of the uploaded video, served so that an upload that is also
+  valid HTML cannot run: origin, `Content-Disposition` and `X-Content-Type-Options`
+  decisions, and a plan for codecs a browser cannot play
 - jump-to-rally video playback
 
 Exit criteria:

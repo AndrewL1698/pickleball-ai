@@ -1,10 +1,10 @@
 # Frontend
 
 The Next.js app added in Phase 1 checkpoint 2, moved from "Videos" to
-"Matches" in Phase 2 checkpoint 1, and showing decoded video metadata since
-checkpoint 2. It covers uploading a match's video, following the processing job
-that results, and reading what it found. The backend it talks to is
-described in `BACKEND.md`.
+"Matches" in Phase 2 checkpoint 1, showing decoded video metadata since
+checkpoint 2, and calibrating the court since checkpoint 5. It covers uploading a
+match's video, following the processing job that results, reading what it found,
+and calibrating the court. The backend it talks to is described in `BACKEND.md`.
 
 ## What It Does and Does Not Do
 
@@ -13,12 +13,12 @@ after submission, upload it as a new match, list every match, and follow one
 match's status and its job through `queued`, `running`, `ready` and `failed` —
 polling only while the answer can still change, and surviving a refresh or a
 revisit because the server is the only source of truth — show the video
-metadata the worker decoded, and start a new extraction where the API would
-accept one.
+metadata the worker decoded, start a new job where the API would accept one, and
+calibrate the court on a still from the video.
 
-It does not play video, calibrate the court, or show analysis results. Nothing
-serves the uploaded file back, and processing reads metadata only. The UI says
-so, on the page, in as many words.
+It does not play video or show analysis results. Nothing serves the uploaded file
+back, and processing reads the video without analysing it. The UI says so, on the
+page, in as many words.
 
 ## Structure
 
@@ -30,6 +30,7 @@ apps/web/
 │   ├── page.tsx                # "/" upload page
 │   ├── matches/page.tsx        # "/matches" list
 │   ├── matches/[matchId]/page.tsx # "/matches/:id" match status, awaits `params`
+│   ├── matches/[matchId]/calibrate/page.tsx # "/matches/:id/calibrate"
 │   ├── error.tsx               # route error boundary (Next 16 `retry` prop)
 │   └── not-found.tsx
 ├── components/
@@ -37,8 +38,11 @@ apps/web/
 │   ├── UploadForm.tsx          # the picker, drop zone, validation, in-flight lock
 │   ├── MatchListView.tsx       # loading / empty / error / populated
 │   ├── MatchDetailView.tsx     # the polling page
+│   ├── CalibrationView.tsx     # placing landmarks, and checking the result
+│   ├── FrameStage.tsx          # a calibration image with an SVG layer, in image pixels
+│   ├── TopDownCourt.tsx        # the court from above, in court feet
 │   ├── StatusBadge.tsx         # job and match badges: word + glyph + colour, never colour alone
-│   ├── ScopeNotice.tsx         # "this build reads video metadata only"
+│   ├── ScopeNotice.tsx         # "this build reads the video and calibrates the court"
 │   ├── Notice.tsx              # boxed message, caller chooses the ARIA role
 │   ├── RefreshButton.tsx       # shared, so its aria-disabled handling cannot drift
 │   └── Spinner.tsx
@@ -46,6 +50,8 @@ apps/web/
 ├── lib/
 │   ├── api.ts                  # the only module that calls the backend
 │   ├── types.ts                # hand-written mirrors of the Pydantic schemas
+│   ├── court.ts                # landmark names and positions, court lines, a position in words
+│   ├── homography.ts           # one pixel through a saved calibration, for a preview
 │   ├── files.ts                # client-side upload validation
 │   ├── format.ts               # timestamps, durations, media length, average fps
 │   └── status.ts               # the words used for each job and match status
@@ -102,7 +108,8 @@ docker compose --profile app up -d --build
 |---|---|
 | `/` | Upload a match. Drag-and-drop or file picker, validation, links to the new match |
 | `/matches` | Every match, newest first: name, file, upload date, and match status |
-| `/matches/:id` | One match: its status, its video and decoded metadata, its latest job's state, earlier attempts, a manual refresh, and **Extract metadata** / **Try again** when usable |
+| `/matches/:id` | One match: its status, its video and decoded metadata, its calibration, its latest job's state, earlier attempts, a manual refresh, and **Extract metadata** / **Make calibration images** / **Try again** when usable |
+| `/matches/:id/calibrate` | Place landmarks on a still, save, and check the result |
 | `/videos` | Redirects (307) to `/matches` |
 | `/videos/:id` | Redirects (307) to `/matches/:id` |
 
@@ -145,6 +152,45 @@ resumes because the new job is queued. It follows the upload form's rules: a
 ref blocks a double submission, `aria-disabled` keeps focus on the button, and a
 refusal or queue failure is shown beside it, linked with `aria-describedby`.
 
+### Court calibration
+
+The **Court calibration** section of the match page summarises a saved calibration
+and anything to review about it, links to the calibration page when
+`can_calibrate` is true, and otherwise says why not, offering **Make calibration
+images** or **Try again** when `can_extract_reference_frames` is true.
+
+`/matches/:id/calibrate` reads the match once and does not poll: nothing there
+changes unless the page asks, and a poll could only overwrite work in progress.
+
+**Placing.** A click places the selected landmark and moves to the next one still
+needing an answer. A placed landmark can be dragged, or reselected from the list.
+**Not visible** skips one, since not every camera sees all twelve. Arrow keys move
+the selected landmark by one image pixel, or ten with Shift, from the image or the
+list, and Enter on the image drops it in the middle, so the whole job can be done
+from the keyboard. A click only resolves to a screen pixel, about two image pixels
+on a laptop, and at the far baseline an image pixel can be a quarter of a foot, so
+the page recommends the arrow keys there. A magnifier follows the pointer or the
+selected landmark, and a small top-down court shows where the selected landmark is.
+Choosing another image keeps the landmarks, which are in the same pixels.
+
+**Checking.** Saving shows the errors, labelled as how well the landmarks agree
+rather than how accurate a position will be, the API's warnings, and the API's
+projected lines over any of the images, including a single frame with players in it.
+A click on one puts the point on the top-down court, and in words. A point above the
+horizon is said not to be on the court plane, because the sum would otherwise produce
+a confident number for a point in the sky, and the page says all this is valid for
+points on the ground only.
+
+The browser fits nothing and decides nothing: the API fits the homography, projects
+the lines, chooses the warnings and refuses what cannot work. The one calculation
+here is projecting a clicked pixel for display (`lib/homography.ts`), and nothing
+is recorded from it.
+
+The image is a plain `<img>`, not `next/image`: it has to be these exact pixels from
+a private API, and an optimizer's resize would only make landmarks harder to place.
+An SVG layer with the image's own size as its `viewBox` sits on top, so anything
+drawn lines up at any page width.
+
 ## Environment Variables
 
 Both are `NEXT_PUBLIC_`, which means they are **inlined into the browser bundle
@@ -164,9 +210,11 @@ the compose service name `api` would not resolve.
 The app calls the API directly from the browser, so the API's CORS list must
 include the app's origin. `http://localhost:3000` and `http://127.0.0.1:3000`
 are allowed by default; a different port needs `PICKLEBALL_CORS_ORIGINS`
-changed. No custom request headers are sent, deliberately: the API's CORS
+changed. Almost no custom request headers are sent, deliberately: the API's CORS
 configuration allows only `Content-Type`, and `multipart/form-data` is
-CORS-safelisted, so an upload is a simple request with no preflight.
+CORS-safelisted, so an upload is a simple request with no preflight. Saving a
+calibration is the exception: it sends JSON, so it is preflighted, which that
+configuration allows.
 
 ## The API Boundary
 
@@ -177,15 +225,16 @@ JSON, or the caller aborted — all reach the UI as one `ApiError` carrying a
 sentence worth showing a person.
 
 Types in `lib/types.ts` are hand-written rather than generated: the contract is
-three entities and a code generator would be more machinery than it earns. The
+a handful of shapes and a code generator would be more machinery than it earns. The
 guard against drift is `npm run check:contract`, which reads the OpenAPI schema
 the running API serves and compares field names and enum values (`JobStatus`,
-`JobStage`, `MatchStatus`) against the declarations, and checks that the
-routes the client calls exist. Run it after any change to the API's schemas.
+`JobStage`, `MatchStatus`, `ReferenceFrameKind`, `CalibrationSource`, `CourtLandmark`)
+against the declarations, and checks that the routes the client calls exist. Run it after any change to the API's schemas.
 
 The client calls `listMatches`, `getMatch`, `createMatch` (the upload),
-`startMetadataJob` and `getJob`. `startMetadataJob` sends a `POST` with no body
-and no headers, so it stays a CORS simple request.
+`startMetadataJob`, `startReferenceFrameJob`, `createCalibration` and `getJob`, and
+`referenceFrameUrl` builds an image's address. The two job calls send a `POST` with
+no body and no headers, so they stay CORS simple requests.
 
 ## Polling
 
@@ -217,19 +266,19 @@ nothing else.
 video-analysis product would otherwise read as "your match has been analysed",
 when all that happened is that its metadata was read.
 
-So: the status page carries a permanent notice that the build reads video
-metadata only; a `ready` job is headed **Processing finished**, with a sentence
-saying processing covers metadata only and no match analysis was performed,
-never "Analysis complete"; there is no results link; the unimplemented pipeline
+So: the status page carries a permanent notice of what this build does; a `ready`
+job is headed **Processing finished**, with a sentence saying processing covers video
+metadata and calibration images and no match analysis was performed, never "Analysis
+complete"; there is no results link; the unimplemented pipeline
 stages are not drawn as a progress checklist; the frame rate is labelled an
 average; and metadata the server does not have is explained rather than shown as
 blank fields or zeros.
 
-The match status follows the same rules. A match whose metadata is extracted is
-**Needs calibration**, in amber rather than green, with a sentence saying
-metadata was extracted and calibration is not available in this build yet. There is no "Ready" match
-badge, because the API has no such status. Tests assert that no match status
-label or description reads as a finished analysis.
+The match status follows the same rules. A processed match is **Needs
+calibration**, in amber rather than green, and a calibrated one is **Court
+calibrated**, with a sentence saying tracking and statistics are not available yet.
+There is no "Ready" match badge, because the API has no such status. Tests assert
+that no match status label or description reads as a finished analysis.
 
 ## Accessibility
 
@@ -290,6 +339,10 @@ restart of `npm run dev` — and a rebuild of the Docker image.
 first bytes for an ISO base-media `ftyp` box. Some older QuickTime `.mov` files
 begin with `moov` instead and are refused.
 
+**A calibration image never loads.** The file is missing from the API's upload
+directory, which happens when the API and worker resolved different ones. See
+`BACKEND.md`.
+
 **Every new upload ends "Processing failed" with `unreadable_video`.** The file
 is not a video OpenCV can decode. The live suite's upload is deliberately just an
 mp4 header, so it ends here too; a real clip ends at **Needs calibration**. If a
@@ -324,6 +377,14 @@ one of them once on a clean checkout.
 - **Retry is limited to extraction that never succeeded.** **Try again** starts a new job;
   once metadata exists there is no way to extract it again.
 - **No delete, no playback, no authentication**, matching the backend.
-- **No browser-driven test.** The live suite drives the real components against
-  the real API in jsdom, which covers the data flow, but nothing here has
-  clicked the real drop zone in a real browser.
+- **No browser-driven test in the repository.** The live suite drives the real
+  components against the real API in jsdom. Calibration was also driven once in real
+  Chrome, with results in `ROADMAP.md`, using a script that was not kept.
+- **The magnifier does not help on a touch screen**, where nothing hovers, though it
+  does follow the selected landmark. The page lays out at phone width, but placing
+  landmarks there is not practical.
+- **No rule for which part of a painted line to click**, so people may mix edges and
+  centers. They differ by about 1 inch.
+- **Saving can repeat.** The button only guards against a save already in flight, so
+  pressing it again with nothing changed adds an identical calibration. The newest
+  wins, so results are unaffected.
