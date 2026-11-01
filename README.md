@@ -78,7 +78,7 @@ model is loaded, and the web app says so on the page. Player tracking in the wor
 Prerequisites:
 
 - [uv](https://docs.astral.sh/uv/) — installs Python 3.13 automatically
-- [Node.js](https://nodejs.org/) 20.9 or newer (24 is what the web image uses), for the frontend
+- [Node.js](https://nodejs.org/) 24, as the web image and CI use, for the frontend. The app needs 20.9 or newer, but the test tools do not start on Node 20
 - Docker Desktop, for PostgreSQL and Redis
 
 ML code runs natively; on Apple Silicon it uses the PyTorch `mps` device.
