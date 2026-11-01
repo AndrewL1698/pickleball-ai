@@ -10,10 +10,11 @@ Three separate units of work, for three different reasons:
   a re-run of a job that already reached `ready`, the state machine says no and
   that is the correct answer, not an error.
 
-On success the processor's result -- the video's metadata -- is written in the
-same transaction as the `ready` transition, so a job is never `ready` without
-its metadata and metadata never appears on a job that did not finish. If that
-write fails, the job is failed instead; it does not reach `ready` first.
+On success the processor's result -- the video's metadata and the calibration
+images it stored -- is written in the same transaction as the `ready`
+transition, so a job is never `ready` without them and they never appear on a
+job that did not finish. If that write fails, the job is failed instead and the
+stored images are deleted; it does not reach `ready` first.
 
 The task takes a job id and nothing else. Everything it needs it reads from
 PostgreSQL, so the queue is not a channel through which paths, filenames, or
@@ -28,7 +29,7 @@ from pickleball_api.config import Settings, get_settings
 from pickleball_api.db import session_scope
 from pickleball_api.errors import JobErrorCode, JobFailure
 from pickleball_api.jobs import InvalidJobTransition, report_progress, transition
-from pickleball_api.models import AnalysisJob, JobStage, JobStatus, utcnow
+from pickleball_api.models import AnalysisJob, JobStage, JobStatus, ReferenceFrame, utcnow
 from pickleball_api.storage import LocalFileStorage, Storage
 from pickleball_worker.processors import (
     ProcessingResult,
@@ -75,16 +76,24 @@ def run_analysis_job(
     try:
         completed = _complete(identifier, result)
     except Exception:
-        # The metadata could not be saved -- a constraint refused it, or the
+        # The result could not be saved -- a constraint refused it, or the
         # database went away. The transaction rolled back, so the job is still
         # `running`; fail it rather than leave it there or call it ready.
         logger.exception("job %s: could not record its result", identifier)
+        _discard_stills(storage, result)
         _finish(identifier, JobStatus.FAILED, error_code=JobErrorCode.INTERNAL)
         return None
     if not completed:
+        _discard_stills(storage, result)
         return None
     logger.info("job %s ready: %s", identifier, result.summary)
     return result.summary
+
+
+def _discard_stills(storage: Storage, result: ProcessingResult) -> None:
+    """Delete images no row will ever point at."""
+    for still in result.stills:
+        storage.delete(still.storage_key)
 
 
 def _claim(job_id: UUID) -> VideoRef | None:
@@ -147,7 +156,7 @@ class _ProgressReporter:
 
 
 def _complete(job_id: UUID, result: ProcessingResult) -> bool:
-    """Save the metadata and mark the job `ready`, in one transaction.
+    """Save the result and mark the job `ready`, in one transaction.
 
     Returns False, writing nothing, if the job is no longer this attempt's to
     finish: a terminal job keeps the metadata and verdict it already has.
@@ -173,6 +182,19 @@ def _complete(job_id: UUID, result: ProcessingResult) -> bool:
         video.frame_count = metadata.frame_count
         video.codec = metadata.codec
         video.metadata_extracted_at = utcnow()
+        job.match.reference_frames.extend(
+            ReferenceFrame(
+                ordinal=ordinal,
+                kind=still.kind,
+                position_seconds=still.position_seconds,
+                source_frame_count=still.source_frame_count,
+                storage_key=still.storage_key,
+                width=still.width,
+                height=still.height,
+                byte_size=still.byte_size,
+            )
+            for ordinal, still in enumerate(result.stills)
+        )
         # Also moves the match to `calibration_required`, in this same commit.
         transition(job, JobStatus.READY, stage=JobStage.METADATA_READY)
         return True

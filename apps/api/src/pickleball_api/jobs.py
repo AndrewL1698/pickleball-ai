@@ -165,7 +165,12 @@ def get_job(session: Session, job_id: UUID) -> AnalysisJob | None:
 def get_match(session: Session, match_id: UUID) -> Match | None:
     return session.scalar(
         select(Match)
-        .options(selectinload(Match.video), selectinload(Match.jobs))
+        .options(
+            selectinload(Match.video),
+            selectinload(Match.jobs),
+            selectinload(Match.reference_frames),
+            selectinload(Match.calibrations),
+        )
         .where(Match.id == match_id)
     )
 

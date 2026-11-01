@@ -9,28 +9,34 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from pickleball_api import jobs, uploads
+from pickleball_api.calibration import CalibrationRejected, fit_calibration
 from pickleball_api.config import MEGABYTE
 from pickleball_api.dependencies import QueueDep, SessionDep, SettingsDep, StorageDep
 from pickleball_api.errors import JobErrorCode
 from pickleball_api.limits import content_length_of, too_large_message
 from pickleball_api.models import (
     AnalysisJob,
+    CalibrationRefusal,
+    CourtCalibration,
     JobStage,
     JobStatus,
     Match,
     MatchStatus,
     MetadataJobRefusal,
+    ReferenceFrame,
+    ReferenceFrameJobRefusal,
     Video,
 )
 from pickleball_api.queue import JobQueue, QueueUnavailable
-from pickleball_api.schemas import MatchDetail, MatchList, MatchSummary
+from pickleball_api.schemas import CalibrationCreate, MatchDetail, MatchList, MatchSummary
 from pickleball_api.storage import (
+    ObjectNotFound,
     ObjectTooLarge,
     Storage,
     discard_on_error,
@@ -47,6 +53,28 @@ REFUSAL_MESSAGES: dict[MetadataJobRefusal, str] = {
     MetadataJobRefusal.NO_VIDEO: "This match has no video to process.",
     MetadataJobRefusal.JOB_ACTIVE: "A processing job for this match is already queued or running.",
     MetadataJobRefusal.ALREADY_EXTRACTED: "This match's video metadata has already been extracted.",
+}
+
+REFERENCE_FRAME_REFUSAL_MESSAGES: dict[ReferenceFrameJobRefusal, str] = {
+    ReferenceFrameJobRefusal.NO_VIDEO: REFUSAL_MESSAGES[MetadataJobRefusal.NO_VIDEO],
+    ReferenceFrameJobRefusal.NO_METADATA: "This match's video metadata has not been extracted yet.",
+    ReferenceFrameJobRefusal.JOB_ACTIVE: REFUSAL_MESSAGES[MetadataJobRefusal.JOB_ACTIVE],
+    ReferenceFrameJobRefusal.ALREADY_EXTRACTED: "This match already has calibration images.",
+}
+
+CALIBRATION_REFUSAL_MESSAGES: dict[CalibrationRefusal, str] = {
+    CalibrationRefusal.NO_REFERENCE_FRAMES: "This match has no calibration images yet.",
+    CalibrationRefusal.JOB_ACTIVE: REFUSAL_MESSAGES[MetadataJobRefusal.JOB_ACTIVE],
+}
+
+#: A frame is written once and never changes, and its id is random.
+REFERENCE_FRAME_HEADERS = {
+    "Cache-Control": "private, max-age=86400, immutable",
+    # The type below is fixed, so nothing may second-guess it, and nothing
+    # opened from this response may run.
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'none'; sandbox",
+    "Content-Disposition": 'inline; filename="reference-frame.jpg"',
 }
 
 #: Slack left free after an upload, so the disk does not end up at exactly 0.
@@ -165,13 +193,130 @@ def start_metadata_job(
     past that, the partial unique index on `analysis_jobs` refuses a second
     active job at commit, and that too is answered `409`.
     """
-    match = session.scalar(select(Match).where(Match.id == match_id).with_for_update())
-    if match is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such match.")
+    match = _lock_match(session, match_id)
     refusal = match.metadata_job_refusal()
     if refusal is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=REFUSAL_MESSAGES[refusal])
+    return _start_job(session, queue, match)
 
+
+@router.post(
+    "/{match_id}/reference-frame-jobs",
+    response_model=MatchDetail,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={409: {"description": "No metadata yet, images already exist, or a job is active"}},
+)
+def start_reference_frame_job(
+    session: SessionDep, queue: QueueDep, match_id: UUID
+) -> MatchDetail:
+    """Queue a job to make calibration images for a match that has none.
+
+    For a match extracted before calibration images existed, or whose attempt at
+    them failed. It is the same job an upload gets, so nothing is enqueued from
+    a migration. Concurrency works as it does for `start_metadata_job`.
+    """
+    match = _lock_match(session, match_id)
+    refusal = match.reference_frame_job_refusal()
+    if refusal is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail=REFERENCE_FRAME_REFUSAL_MESSAGES[refusal]
+        )
+    return _start_job(session, queue, match)
+
+
+@router.get(
+    "/{match_id}/reference-frames/{frame_id}",
+    response_class=Response,
+    responses={200: {"content": {"image/jpeg": {}}}},
+)
+def read_reference_frame(
+    session: SessionDep, storage: StorageDep, match_id: UUID, frame_id: UUID
+) -> Response:
+    """One calibration image.
+
+    The worker generated these bytes, so unlike the upload they cannot be a file
+    a visitor chose. The small size means reading it whole does no harm.
+    """
+    frame = session.get(ReferenceFrame, frame_id)
+    if frame is None or frame.match_id != match_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such calibration image.")
+    try:
+        with storage.open(frame.storage_key) as stored:
+            content = stored.read()
+    except ObjectNotFound as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="This calibration image is no longer in storage."
+        ) from exc
+    return Response(content=content, media_type="image/jpeg", headers=REFERENCE_FRAME_HEADERS)
+
+
+@router.post(
+    "/{match_id}/calibrations",
+    response_model=MatchDetail,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        409: {"description": "No calibration images yet, or a job is active"},
+        422: {"description": "The landmarks cannot produce a usable calibration"},
+    },
+)
+def create_calibration(
+    session: SessionDep, match_id: UUID, body: CalibrationCreate
+) -> MatchDetail:
+    """Fit a homography to landmarks placed on a reference frame, and save it.
+
+    A homography over a dozen points takes no meaningful time, so this runs in
+    the request and the answer comes straight back. An earlier calibration is
+    kept: the newest is the one in force.
+    """
+    match = _lock_match(session, match_id)
+    refusal = match.calibration_refusal()
+    if refusal is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail=CALIBRATION_REFUSAL_MESSAGES[refusal]
+        )
+    frame = next((f for f in match.reference_frames if f.id == body.reference_frame_id), None)
+    if frame is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="That calibration image does not belong to this match.",
+        )
+    try:
+        fitted = fit_calibration(
+            {landmark.value: point for landmark, point in body.image_points.items()},
+            width=frame.width,
+            height=frame.height,
+        )
+    except CalibrationRejected as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.detail
+        ) from exc
+
+    match.calibrations.append(
+        CourtCalibration(
+            reference_frame_id=frame.id,
+            image_points=fitted.image_points,
+            court_points=fitted.court_points,
+            homography=fitted.homography,
+            reprojection_error_ft=fitted.reprojection_error_ft,
+            mean_reprojection_error_ft=fitted.mean_reprojection_error_ft,
+            max_reprojection_error_ft=fitted.max_reprojection_error_ft,
+        )
+    )
+    match.status = MatchStatus.COURT_READY
+    session.commit()
+    return MatchDetail.of(match)
+
+
+def _lock_match(session: Session, match_id: UUID) -> Match:
+    """The match, locked until commit, so requests for it take turns on PostgreSQL."""
+    match = session.scalar(select(Match).where(Match.id == match_id).with_for_update())
+    if match is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such match.")
+    return match
+
+
+def _start_job(session: Session, queue: JobQueue, match: Match) -> MatchDetail:
+    """Commit a new job for a match that has been checked, then queue it."""
     job = jobs.new_job(match)
     session.add(job)
     try:

@@ -107,6 +107,7 @@ _STATUS_CODES = {
     409: "conflict",
     413: "upload_too_large",
     415: "unsupported_file_type",
+    422: "invalid_request",
     503: "dependency_unavailable",
     507: "insufficient_storage",
 }

@@ -1,20 +1,32 @@
 """Running a job to a terminal status, and refusing to run one twice."""
 
 import uuid
+from dataclasses import replace
 
 import pytest
 from sqlalchemy import Engine
 
 from pickleball_api import db
 from pickleball_api.errors import JobErrorCode, JobFailure
-from pickleball_api.models import AnalysisJob, JobStage, JobStatus, Match, MatchStatus, Video
+from pickleball_api.models import (
+    AnalysisJob,
+    JobStage,
+    JobStatus,
+    Match,
+    MatchStatus,
+    ReferenceFrame,
+    ReferenceFrameKind,
+    Video,
+)
 from pickleball_api.storage import LocalFileStorage, Storage, new_storage_key
 from pickleball_api.testing import video_bytes
 from pickleball_worker.processors import (
+    CalibrationPreparationProcessor,
     ExtractedMetadata,
     MetadataProcessor,
     ProcessingResult,
     ProgressReporter,
+    StoredStill,
     VideoRef,
     default_processor,
 )
@@ -99,7 +111,8 @@ def test_a_real_video_is_decoded_and_its_metadata_saved(
     """End to end with the real reader: a 64x48 clip tagged 90 degrees."""
     _, job = stored_video
     summary = run_analysis_job(str(job.id), processor=default_processor(), storage=storage)
-    assert summary == {"processor": "metadata", "processor_version": "1"}
+    assert summary is not None
+    assert summary["processor"] == "calibration_preparation"
 
     finished = reload(job.id)
     assert finished.status is JobStatus.READY
@@ -119,8 +132,96 @@ def test_a_real_video_is_decoded_and_its_metadata_saved(
     assert match_status(job.id) is MatchStatus.CALIBRATION_REQUIRED
 
 
-def test_the_default_processor_is_the_metadata_processor() -> None:
-    assert isinstance(default_processor(), MetadataProcessor)
+def test_the_default_processor_prepares_for_calibration() -> None:
+    assert isinstance(default_processor(), CalibrationPreparationProcessor)
+
+
+def reference_frames(job_id: uuid.UUID) -> list[ReferenceFrame]:
+    with db.session_scope() as session:
+        job = session.get(AnalysisJob, job_id)
+        assert job is not None
+        return list(job.match.reference_frames)
+
+
+def test_a_real_video_gets_stored_calibration_images_in_display_orientation(
+    stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
+) -> None:
+    _, job = stored_video
+    run_analysis_job(str(job.id), processor=default_processor(), storage=storage)
+
+    frames = reference_frames(job.id)
+    assert [frame.kind for frame in frames] == [
+        ReferenceFrameKind.BACKGROUND,
+        *[ReferenceFrameKind.SAMPLE] * 3,
+    ]
+    assert [frame.ordinal for frame in frames] == [0, 1, 2, 3]
+    assert frames[0].position_seconds is None
+    assert frames[0].source_frame_count > 1
+    positions = [frame.position_seconds for frame in frames[1:]]
+    assert positions == sorted(p for p in positions if p is not None)
+    for frame in frames:
+        # Stored 64x48, rotated 90 degrees: the same pixels as the metadata says.
+        assert (frame.width, frame.height) == (48, 64)
+        assert storage.size(frame.storage_key) == frame.byte_size
+        with storage.open(frame.storage_key) as stored:
+            assert stored.read(3) == b"\xff\xd8\xff"  # a JPEG, whatever was uploaded
+
+
+STILL = StoredStill(
+    storage_key="", kind=ReferenceFrameKind.BACKGROUND, position_seconds=None,
+    source_frame_count=25, width=1920, height=1080, byte_size=4,
+)
+
+
+def stored_still(storage: LocalFileStorage, **overrides: object) -> StoredStill:
+    key = new_storage_key(".jpg")
+    storage.write(key, [b"jpeg"], max_bytes=4)
+    return replace(STILL, storage_key=key, **overrides)  # type: ignore[arg-type]
+
+
+def test_images_that_cannot_be_saved_are_deleted_with_the_failed_job(
+    stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
+) -> None:
+    """The database refuses the row, so nothing would ever point at the file."""
+    _, job = stored_video
+    still = stored_still(storage, position_seconds=12.0)  # a background has no position
+
+    class Refused:
+        name, version = "refused", "1"
+
+        def process(
+            self, video: VideoRef, s: Storage, report: ProgressReporter
+        ) -> ProcessingResult:
+            return ProcessingResult(metadata=METADATA, stills=(still,))
+
+    assert run_analysis_job(str(job.id), processor=Refused(), storage=storage) is None
+    assert reload(job.id).status is JobStatus.FAILED
+    assert reload_video(job.id).decoded_metadata is None
+    assert reference_frames(job.id) == []
+    assert not storage.exists(still.storage_key)
+
+
+def test_images_from_an_overtaken_attempt_are_deleted(
+    stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
+) -> None:
+    _, job = stored_video
+    still = stored_still(storage)
+
+    class Overtaken:
+        name, version = "overtaken", "1"
+
+        def process(
+            self, video: VideoRef, s: Storage, report: ProgressReporter
+        ) -> ProcessingResult:
+            with db.session_scope() as session:
+                other = session.get(AnalysisJob, job.id)
+                assert other is not None
+                other.status = JobStatus.FAILED
+            return ProcessingResult(metadata=METADATA, stills=(still,))
+
+    assert run_analysis_job(str(job.id), processor=Overtaken(), storage=storage) is None
+    assert reference_frames(job.id) == []
+    assert not storage.exists(still.storage_key)
 
 
 def test_processed_metadata_is_saved_exactly(
