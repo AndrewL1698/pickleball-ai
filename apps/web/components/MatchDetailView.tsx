@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useId, useRef, useState } from "react";
-import { ApiError, getMatch, startMetadataJob } from "@/lib/api";
+import { ApiError, getMatch, startMetadataJob, startReferenceFrameJob } from "@/lib/api";
 import { formatBytes } from "@/lib/files";
 import {
   formatAverageFps,
@@ -169,6 +169,8 @@ export function MatchDetailView({
         onStarted={refresh}
       />
 
+      <CalibrationSection match={data} onStarted={refresh} />
+
       <section aria-labelledby="checks-heading">
         <h2 id="checks-heading" className="text-lg font-semibold">
           Status checks
@@ -276,8 +278,8 @@ function MetadataSection({
         <div className="mt-3 space-y-3">
           <p className="text-sm text-muted">{missingMetadataReason(video, job, isActive)}</p>
           {canExtract ? (
-            <ExtractMetadataButton
-              matchId={matchId}
+            <StartJobButton
+              start={() => startMetadataJob(matchId)}
               label={job?.status === "failed" ? "Try again" : "Extract metadata"}
               onStarted={onStarted}
             />
@@ -301,16 +303,107 @@ function missingMetadataReason(video: Video | null, job: Job | null, isActive: b
 }
 
 /**
- * Asks the API for a new metadata job. The same in-flight rules as the upload
- * form: a ref blocks a double submission that React would not re-render in
- * time to stop, and `aria-disabled` keeps focus on the button.
+ * Whether the court is calibrated, and how to get there if it is not. The action
+ * on offer is the one the server says it would accept.
  */
-function ExtractMetadataButton({
-  matchId,
+function CalibrationSection({
+  match,
+  onStarted,
+}: {
+  match: MatchDetail;
+  onStarted: () => void;
+}) {
+  const { calibration } = match;
+  const job = match.latest_job;
+  const isActive = job?.status === "queued" || job?.status === "running";
+  const calibrateLink = (label: string) => (
+    <Link
+      href={`/matches/${match.id}/calibrate`}
+      className="focus-ring inline-flex min-h-11 items-center rounded-lg bg-accent px-4 font-medium text-background"
+    >
+      {label}
+    </Link>
+  );
+
+  return (
+    <section aria-labelledby="calibration-heading">
+      <h2 id="calibration-heading" className="text-lg font-semibold">
+        Court calibration
+      </h2>
+      <div className="mt-3 space-y-3">
+        {calibration ? (
+          <>
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+              <Field label="Landmarks used" value={String(Object.keys(calibration.image_points).length)} />
+              <Field label="Saved" value={formatTimestamp(calibration.created_at)} />
+              <Field
+                label="Average error"
+                value={`${calibration.mean_reprojection_error_ft.toFixed(2)} ft`}
+              />
+              <Field
+                label="Largest error"
+                value={`${calibration.max_reprojection_error_ft.toFixed(2)} ft`}
+              />
+            </dl>
+            {calibration.warnings.length > 0 ? (
+              <Notice tone="error" title="Review this calibration.">
+                <ul className="space-y-1">
+                  {calibration.warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              </Notice>
+            ) : null}
+            {match.can_calibrate ? calibrateLink("Check or recalibrate") : null}
+          </>
+        ) : match.can_calibrate ? (
+          <>
+            <p className="text-sm text-muted">
+              Mark where the court lines are on a still from the video, so that positions in the
+              image can be turned into positions on the court.
+            </p>
+            {calibrateLink("Calibrate the court")}
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted">{notCalibratableReason(match, isActive)}</p>
+            {match.can_extract_reference_frames ? (
+              <StartJobButton
+                start={() => startReferenceFrameJob(match.id)}
+                label={job?.status === "failed" ? "Try again" : "Make calibration images"}
+                onStarted={onStarted}
+              />
+            ) : null}
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function notCalibratableReason(match: MatchDetail, isActive: boolean): string {
+  if (match.video === null) return "There is no video to calibrate on.";
+  if (isActive) return "Calibration images are being made. Calibration opens when the job finishes.";
+  if (match.latest_job?.status === "failed") {
+    return "Calibration needs images from the video, and processing failed before they were saved.";
+  }
+  if (match.can_extract_reference_frames) {
+    return "Calibration needs images from the video. This match was processed before they were added.";
+  }
+  return "Calibration needs images from the video, and this match has none yet.";
+}
+
+/**
+ * Asks the API for a new job. The same in-flight rules as the upload form: a ref
+ * blocks a double submission that React would not re-render in time to stop, and
+ * `aria-disabled` keeps focus on the button.
+ */
+function StartJobButton({
+  start: startJob,
   label,
   onStarted,
 }: {
-  matchId: string;
+  start: () => Promise<unknown>;
   label: string;
   onStarted: () => void;
 }) {
@@ -325,7 +418,7 @@ function ExtractMetadataButton({
     setIsStarting(true);
     setProblem(null);
     try {
-      await startMetadataJob(matchId);
+      await startJob();
       // Reload the match: the new job is queued, so polling resumes.
       onStarted();
     } catch (cause) {

@@ -8,6 +8,7 @@ file and no database. The real decode is covered in `test_tasks.py`.
 import uuid
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from pickleball_api.errors import JobErrorCode, JobFailure
@@ -15,7 +16,12 @@ from pickleball_api.models import JobStage
 from pickleball_api.storage import LocalFileStorage, new_storage_key
 from pickleball_ml.video.reader import InvalidVideoMetadata, VideoMetadata, VideoReadError
 from pickleball_worker import processors
-from pickleball_worker.processors import MetadataProcessor, ProcessingResult, VideoRef
+from pickleball_worker.processors import (
+    CalibrationPreparationProcessor,
+    MetadataProcessor,
+    ProcessingResult,
+    VideoRef,
+)
 
 CONTENT = b"stand-in bytes; the decoder is mocked"
 
@@ -173,6 +179,68 @@ def test_progress_is_reported_and_never_claims_the_terminal_stage(
     assert reports[0] == (JobStage.INGESTED, 0.0)
     assert all(stage is JobStage.INGESTED for stage, _ in reports)
     assert [p for _, p in reports] == sorted(p for _, p in reports)
+
+
+def prepare(ref: VideoRef, storage: LocalFileStorage) -> ProcessingResult:
+    return CalibrationPreparationProcessor().process(ref, storage, lambda stage, progress: None)
+
+
+def fake_frames(count: int) -> list[tuple[float, np.ndarray]]:
+    return [(float(i), np.full((48, 64, 3), 128, dtype=np.uint8)) for i in range(count)]
+
+
+def stored_jpegs(storage: LocalFileStorage) -> list[Path]:
+    return list(storage.root.glob("*.jpg"))
+
+
+def test_a_video_with_metadata_but_no_decodable_frame_is_unreadable(
+    ref: VideoRef, storage: LocalFileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(processors, "read_metadata", lambda path: decoded())
+    monkeypatch.setattr(processors, "sample_frames", lambda path, seconds: iter(()))
+    with pytest.raises(JobFailure) as failure:
+        prepare(ref, storage)
+    assert failure.value.code is JobErrorCode.UNREADABLE_VIDEO
+    assert stored_jpegs(storage) == []
+
+
+def test_samples_come_from_across_the_whole_video(
+    ref: VideoRef, storage: LocalFileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requested: list[float] = []
+
+    def sampled(path: Path, seconds: list[float]) -> list[tuple[float, np.ndarray]]:
+        requested.extend(seconds)
+        return fake_frames(len(seconds))
+
+    monkeypatch.setattr(processors, "read_metadata", lambda path: decoded(duration_seconds=100.0))
+    monkeypatch.setattr(processors, "sample_frames", sampled)
+    result = prepare(ref, storage)
+    assert len(requested) == processors.BACKGROUND_SAMPLES
+    assert requested[0] == pytest.approx(2.0)
+    assert requested[-1] == pytest.approx(98.0)
+    assert result.stills[0].source_frame_count == processors.BACKGROUND_SAMPLES
+
+
+def test_a_failed_write_leaves_no_stills_behind(
+    ref: VideoRef, storage: LocalFileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(processors, "read_metadata", lambda path: decoded())
+    monkeypatch.setattr(processors, "sample_frames", lambda path, seconds: fake_frames(5))
+    real_write = storage.write
+    writes = 0
+
+    def failing_write(key: str, chunks: list[bytes], *, max_bytes: int) -> int:
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("disk full")
+        return real_write(key, chunks, max_bytes=max_bytes)
+
+    monkeypatch.setattr(storage, "write", failing_write)
+    with pytest.raises(OSError, match="disk full"):
+        prepare(ref, storage)
+    assert stored_jpegs(storage) == []
 
 
 def test_the_worker_does_not_import_torch_or_ultralytics() -> None:

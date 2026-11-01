@@ -65,6 +65,9 @@ for (const [apiName, typeName] of [
   ["JobRead", "Job"],
   ["VideoRead", "Video"],
   ["VideoMetadataRead", "VideoMetadata"],
+  ["ReferenceFrameRead", "ReferenceFrame"],
+  ["CalibrationRead", "CourtCalibration"],
+  ["CalibrationCreate", "CalibrationRequest"],
   ["MatchSummary", "MatchSummary"],
   ["MatchList", "MatchList"],
 ]) {
@@ -90,6 +93,9 @@ for (const path of [
   "/api/matches",
   "/api/matches/{match_id}",
   "/api/matches/{match_id}/metadata-jobs",
+  "/api/matches/{match_id}/reference-frame-jobs",
+  "/api/matches/{match_id}/reference-frames/{frame_id}",
+  "/api/matches/{match_id}/calibrations",
   "/api/jobs/{job_id}",
 ]) {
   if (!(path in schema.paths)) problems.push(`the API does not serve ${path}`);
@@ -101,6 +107,25 @@ compare(
   "MatchStatus",
   new Set(components.MatchStatus.enum),
   declaredValues(source, "MATCH_STATUSES"),
+  problems,
+);
+
+compare(
+  "ReferenceFrameKind",
+  new Set(components.ReferenceFrameKind.enum),
+  declaredValues(source, "REFERENCE_FRAME_KINDS"),
+  problems,
+);
+compare(
+  "CalibrationSource",
+  new Set(components.CalibrationSource.enum),
+  declaredValues(source, "CALIBRATION_SOURCES"),
+  problems,
+);
+compare(
+  "CourtLandmark",
+  new Set(components.CourtLandmark.enum),
+  declaredValues(source, "LANDMARK_NAMES"),
   problems,
 );
 

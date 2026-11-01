@@ -9,9 +9,18 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, computed_field
 
-from pickleball_api.models import AnalysisJob, JobStage, JobStatus, Match, MatchStatus
+from pickleball_api.calibration import CourtLandmark, calibration_warnings, projected_court_lines
+from pickleball_api.models import (
+    AnalysisJob,
+    CalibrationSource,
+    JobStage,
+    JobStatus,
+    Match,
+    MatchStatus,
+    ReferenceFrameKind,
+)
 
 
 class JobRead(BaseModel):
@@ -93,13 +102,84 @@ class MatchSummary(BaseModel):
         return cls.model_validate(match)
 
 
+class ReferenceFrameRead(BaseModel):
+    """A still to place calibration landmarks on, minus where it is stored.
+
+    `width` and `height` are its pixels, which are the video's own in display
+    orientation. `position_seconds` is approximate, and null for a background.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    kind: ReferenceFrameKind
+    position_seconds: float | None
+    source_frame_count: int = Field(gt=0)
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    created_at: datetime
+
+
+class CalibrationCreate(BaseModel):
+    """Landmarks placed on one reference frame, in that frame's pixels."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reference_frame_id: UUID
+    image_points: dict[CourtLandmark, tuple[FiniteFloat, FiniteFloat]]
+
+
+class CalibrationRead(BaseModel):
+    """A fitted calibration, and what is known about its quality.
+
+    `homography` maps image pixels to court feet, and is valid for points on the
+    ground plane only. The error is how far each landmark lands from where it
+    should, which says how well the clicks agree, not how accurate a position is.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    reference_frame_id: UUID
+    source: CalibrationSource
+    image_points: dict[str, tuple[float, float]]
+    court_points: dict[str, tuple[float, float]]
+    homography: list[list[float]]
+    reprojection_error_ft: dict[str, float]
+    mean_reprojection_error_ft: float = Field(ge=0)
+    max_reprojection_error_ft: float = Field(ge=0)
+    created_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def projected_lines(self) -> dict[str, list[tuple[float, float]]]:
+        """Each court line's two ends in image pixels, for drawing an overlay."""
+        return projected_court_lines(self.homography)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def warnings(self) -> list[str]:
+        """Fixed sentences for anything a person should review. Empty if nothing."""
+        return calibration_warnings(
+            self.court_points, self.mean_reprojection_error_ft, self.max_reprojection_error_ft
+        )
+
+
 class MatchDetail(MatchSummary):
     """One match and every attempt made at processing it, oldest first."""
 
     jobs: list[JobRead]
+    reference_frames: list[ReferenceFrameRead]
+    #: The calibration in force, or null if the court has not been calibrated.
+    calibration: CalibrationRead | None = Field(validation_alias="latest_calibration")
     #: Whether `POST /api/matches/{id}/metadata-jobs` would accept a request
     #: right now: the metadata is absent and no job is queued or running.
     can_extract_metadata: bool
+    #: Whether `POST /api/matches/{id}/reference-frame-jobs` would accept a
+    #: request: there is metadata, no calibration images, and no active job.
+    can_extract_reference_frames: bool
+    #: Whether `POST /api/matches/{id}/calibrations` would accept a request.
+    can_calibrate: bool
 
     @classmethod
     def of(cls, match: Match) -> "MatchDetail":

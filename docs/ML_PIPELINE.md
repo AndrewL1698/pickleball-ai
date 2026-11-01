@@ -21,7 +21,7 @@ Each stage should expose debug visualizations and evaluation metrics.
 ## 1. Court Calibration
 
 ### MVP
-Manual landmark selection + homography. Start with a CLI click tool on a single frame; a web calibration UI comes later.
+Manual landmark selection + homography, with a CLI click tool (`pbml calibrate`) and a web calibration page (`docs/FRONTEND.md`) that fit through the same `pickleball_ml.court.geometry`.
 
 ### Later
 Train/detect court keypoints automatically.

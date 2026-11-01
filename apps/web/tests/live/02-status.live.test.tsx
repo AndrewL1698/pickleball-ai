@@ -39,7 +39,7 @@ it("renders the newest upload and follows its job to a terminal state", async ()
   });
 
   // With the worker running this becomes `ready`. Going straight there from
-  // `queued` without an observed `running` is normal: reading metadata
+  // `queued` without an observed `running` is normal: reading a short clip
   // finishes in well under a second.
   await waitFor(
     () =>
@@ -49,7 +49,7 @@ it("renders the newest upload and follows its job to a terminal state", async ()
     { timeout: 30000 },
   );
 
-  expect(screen.getByText(/reads video metadata only/i)).toBeInTheDocument();
+  expect(screen.getByText(/calibrates the court, and nothing more/i)).toBeInTheDocument();
   // A finished job leaves the match waiting for calibration, never "ready".
   expect(screen.getByTestId("match-status-badge")).toHaveTextContent(
     /needs calibration|failed/i,

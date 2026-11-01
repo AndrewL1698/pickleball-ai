@@ -12,6 +12,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MatchDetailView } from "@/components/MatchDetailView";
 import {
+  CALIBRATABLE_MATCH,
+  CALIBRATED_MATCH,
+  COURT_CALIBRATION,
   JOB_FAILED,
   JOB_QUEUED,
   JOB_READY,
@@ -22,7 +25,7 @@ import {
   jsonResponse,
   wait,
 } from "./fixtures";
-import type { Job, MatchStatus } from "@/lib/types";
+import type { Job, MatchDetail, MatchStatus } from "@/lib/types";
 
 // Async factory: `vi.mock` is hoisted above the imports, so the stub has to
 // be pulled in when the factory runs rather than at module scope.
@@ -72,7 +75,7 @@ describe("status lifecycle", () => {
     render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
 
     expect(await screen.findByText(/waiting to start/i)).toBeInTheDocument();
-    expect(await screen.findByText(/reading video metadata/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /reading the video/i })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: /processing finished/i })).toBeInTheDocument();
 
     await waitFor(() =>
@@ -157,18 +160,18 @@ describe("honesty about what was analysed", () => {
     const { container } = render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
     await screen.findByRole("heading", { name: /processing finished/i });
 
-    expect(screen.getByText(/reads video metadata only/i)).toBeInTheDocument();
+    expect(screen.getByText(/calibrates the court, and nothing more/i)).toBeInTheDocument();
     expect(screen.getByText(/No match analysis has been performed/i)).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/analysis complete/i);
     expect(container.textContent).not.toMatch(/view results/i);
   });
 
-  it("says the match needs calibration, and that calibration is not available", async () => {
+  it("says the match needs calibration", async () => {
     respondWith([JOB_READY]);
     render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
     await screen.findByRole("heading", { name: /processing finished/i });
     expect(screen.getByTestId("match-status-badge")).toHaveTextContent(/needs calibration/i);
-    expect(screen.getByText(/calibration is not available in this build/i)).toBeInTheDocument();
+    expect(screen.getByText(/has to be calibrated next/i)).toBeInTheDocument();
   });
 
   it("shows a failed match alongside its failed job", async () => {
@@ -402,7 +405,7 @@ describe("video metadata", () => {
   it("says metadata is being extracted while the job is active, with no action", async () => {
     respondWith([JOB_RUNNING]);
     render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
-    await screen.findByRole("heading", { name: /reading video metadata/i });
+    await screen.findByRole("heading", { name: /reading the video/i });
     expect(within(metadataSection()).getByText(/being extracted/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /extract metadata|try again/i })).toBeNull();
   });
@@ -515,5 +518,92 @@ describe("video metadata", () => {
     await user.click(button);
     const message = await screen.findByText(/already queued or running/i);
     expect(button.getAttribute("aria-describedby")).toBe(message.id);
+  });
+});
+
+describe("court calibration", () => {
+  function section() {
+    return screen.getByRole("region", { name: /court calibration/i });
+  }
+
+  function serveOnce(match: MatchDetail) {
+    const fetchMock = vi.fn(async () => jsonResponse(match));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("links to calibration when the server says it can be done", async () => {
+    serveOnce(CALIBRATABLE_MATCH);
+    render(<MatchDetailView matchId={MATCH_ID} />);
+    await screen.findByRole("heading", { name: /processing finished/i });
+    expect(within(section()).getByRole("link", { name: /calibrate the court/i })).toHaveAttribute(
+      "href",
+      `/matches/${MATCH_ID}/calibrate`,
+    );
+  });
+
+  it("summarises a saved calibration, and what to review about it", async () => {
+    serveOnce({
+      ...CALIBRATED_MATCH,
+      calibration: { ...COURT_CALIBRATION, warnings: ["Check this."] },
+    });
+    render(<MatchDetailView matchId={MATCH_ID} />);
+    await screen.findByRole("heading", { name: /processing finished/i });
+    const summary = within(section());
+    expect(summary.getByText("0.23 ft")).toBeInTheDocument();
+    expect(summary.getByText("0.40 ft")).toBeInTheDocument();
+    expect(summary.getByText("Check this.")).toBeInTheDocument();
+    expect(summary.getByRole("link", { name: /check or recalibrate/i })).toBeInTheDocument();
+  });
+
+  it("says images are being made while the job is active, with no action", async () => {
+    respondWith([JOB_QUEUED]);
+    render(<MatchDetailView matchId={MATCH_ID} pollIntervalMs={20} />);
+    await screen.findByRole("heading", { name: /waiting to start/i });
+    expect(within(section()).getByText(/images are being made/i)).toBeInTheDocument();
+    expect(within(section()).queryByRole("link")).toBeNull();
+    expect(within(section()).queryByRole("button")).toBeNull();
+  });
+
+  it("says why an older match cannot be calibrated, and starts a job for its images", async () => {
+    const older: MatchDetail = {
+      ...CALIBRATABLE_MATCH,
+      can_calibrate: false,
+      can_extract_reference_frames: true,
+      reference_frames: [],
+    };
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? jsonResponse({ ...older, can_extract_reference_frames: false }, 202)
+        : jsonResponse(older),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MatchDetailView matchId={MATCH_ID} />);
+    await screen.findByRole("heading", { name: /processing finished/i });
+    expect(within(section()).getByText(/processed before they were added/i)).toBeInTheDocument();
+
+    await userEvent.click(within(section()).getByRole("button", { name: /make calibration images/i }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true),
+    );
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(post?.[0]).toMatch(new RegExp(`/api/matches/${MATCH_ID}/reference-frame-jobs$`));
+  });
+
+  it("offers the images again after they failed, only if the server would accept it", async () => {
+    const failed: MatchDetail = {
+      ...CALIBRATABLE_MATCH,
+      status: "failed",
+      latest_job: JOB_FAILED,
+      jobs: [JOB_FAILED],
+      can_calibrate: false,
+      can_extract_reference_frames: true,
+      reference_frames: [],
+    };
+    serveOnce(failed);
+    render(<MatchDetailView matchId={MATCH_ID} />);
+    await screen.findByRole("heading", { name: /processing failed/i });
+    expect(within(section()).getByText(/processing failed before they were saved/i)).toBeInTheDocument();
+    expect(within(section()).getByRole("button", { name: /try again/i })).toBeInTheDocument();
   });
 });

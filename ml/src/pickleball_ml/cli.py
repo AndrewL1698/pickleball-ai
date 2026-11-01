@@ -35,7 +35,7 @@ import numpy as np
 import pandas as pd
 
 from pickleball_ml.court.calibration import Calibration, draw_court_overlay
-from pickleball_ml.court.click_tool import collect_landmarks, median_background
+from pickleball_ml.court.click_tool import collect_landmarks
 from pickleball_ml.evaluation.identity import evaluate_identity
 from pickleball_ml.experiment import (
     ALL_STAGES,
@@ -50,7 +50,13 @@ from pickleball_ml.paths import DEFAULT_PROCESSED_ROOT, StageOutputs
 from pickleball_ml.players.identity import IdentityConfig, resolve_identities, run_record
 from pickleball_ml.players.tracking import TrackingConfig, track_people
 from pickleball_ml.render.topdown import render_topdown_video
-from pickleball_ml.video.reader import Frame, iter_frames, read_frame, read_metadata
+from pickleball_ml.video.reader import (
+    Frame,
+    iter_frames,
+    median_background,
+    read_frame,
+    read_metadata,
+)
 
 BACKGROUND_SAMPLES = 61
 

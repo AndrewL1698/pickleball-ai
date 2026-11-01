@@ -88,7 +88,7 @@ def _run_calibrate(
 
         from pickleball_ml.court.calibration import Calibration, draw_court_overlay
         from pickleball_ml.court.camera import sample_frames_by_time
-        from pickleball_ml.court.click_tool import median_background
+        from pickleball_ml.video.reader import median_background
 
         start_s, end_s = segment.background
         samples = 61
@@ -141,7 +141,7 @@ def _run_camera(
             sample_frames_by_time,
             summarize_drift,
         )
-        from pickleball_ml.court.click_tool import median_background
+        from pickleball_ml.video.reader import median_background
 
         calibration = Calibration.load(calibration_path)
         width, height = int(metadata["width"]), int(metadata["height"])

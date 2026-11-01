@@ -1,8 +1,9 @@
 # Backend
 
 The FastAPI service, the database, the storage layer and the job worker added in
-Phase 1, re-parented under `Match` in Phase 2 checkpoint 1, and given real video
-metadata extraction in checkpoint 2. The architecture
+Phase 1, re-parented under `Match` in Phase 2 checkpoint 1, given real video
+metadata extraction in checkpoint 2, and calibration images and court calibrations
+in checkpoints 3 and 4. The architecture
 this is heading towards is in `ARCHITECTURE.md`, and the eventual schema is in
 `DATA_MODEL.md`.
 
@@ -10,18 +11,19 @@ this is heading towards is in `ARCHITECTURE.md`, and the eventual schema is in
 
 It does: accept a video upload as a new match, store the file, record the match,
 its video and a job, queue the job, let a worker claim it, decode the video's
-metadata and drive the job through `queued -> running -> ready` (or `failed`)
-while the match's status follows, retry extraction on request, and expose
-enough over HTTP for a frontend to list and inspect matches.
+metadata and make stills from it, drive the job through
+`queued -> running -> ready` (or `failed`) while the match's status follows, retry
+on request, fit and save a court calibration, and expose enough over HTTP for a
+frontend to list and inspect matches.
 
-It does not analyse the match. The worker's `MetadataProcessor` reads the
-video's dimensions, rotation, average frame rate, duration, frame count and
-codec with `pickleball_ml.video.reader.read_metadata`, and nothing else: no
-frame is analysed and no model is loaded. It sits behind the same interface
-(`pickleball_worker.processors.VideoProcessor`) that later stages will use.
+It does not analyse the match. The worker's `CalibrationPreparationProcessor` reads
+the video's dimensions, rotation, average frame rate, duration, frame count and
+codec, and writes stills of it, with `pickleball_ml.video.reader`, and nothing else:
+nothing in a frame is analysed and no model is loaded. It sits behind the same
+interface (`pickleball_worker.processors.VideoProcessor`) that later stages will use.
 
-There is no authentication, no video playback and no calibration yet. The web
-app that drives this API is described in `FRONTEND.md`.
+There is no authentication and no video playback yet. The web app that drives this
+API is described in `FRONTEND.md`.
 
 ## Directory Structure
 
@@ -31,15 +33,16 @@ apps/api/                              # package `pickleball_api`
 ├── Dockerfile                         # shared by the api and worker compose services
 ├── migrations/
 │   ├── env.py                         # reads the URL from settings unless given one
-│   └── versions/                      # 0001 the tables, 0002 enum CHECKs, 0003 matches
+│   └── versions/                      # 0001 tables, 0002 CHECKs, 0003 matches, 0004 metadata, 0005 stills, 0006 calibrations
 ├── src/pickleball_api/
+│   ├── calibration.py                 # fits landmarks through pickleball_ml, or refuses them
 │   ├── config.py                      # typed settings, and the extension allowlist
 │   ├── db.py                          # engine, session factory, request/worker sessions
 │   ├── dependencies.py                # what routes ask for: settings, session, storage, queue
 │   ├── errors.py                      # job error codes and their user-safe messages
 │   ├── jobs.py                        # the job state machine, match status sync, read queries
 │   ├── main.py                        # create_app(): middleware, routers, error handlers
-│   ├── models.py                      # SQLAlchemy tables: Match, Video, AnalysisJob
+│   ├── models.py                      # Match, Video, AnalysisJob, ReferenceFrame, CourtCalibration
 │   ├── queue.py                       # JobQueue interface, RQ and recording implementations
 │   ├── schemas.py                     # Pydantic response models
 │   ├── limits.py                      # refuses an oversized body before it is read
@@ -52,7 +55,7 @@ apps/api/                              # package `pickleball_api`
 
 workers/video_processor/               # package `pickleball_worker`
 ├── src/pickleball_worker/
-│   ├── processors.py                  # VideoProcessor interface + PlaceholderProcessor
+│   ├── processors.py                  # VideoProcessor, MetadataProcessor, CalibrationPreparationProcessor
 │   ├── tasks.py                       # the RQ task and its transaction boundaries
 │   └── __main__.py                    # `pbworker`
 └── tests/
@@ -64,17 +67,25 @@ Both are uv workspace members alongside `ml/`.
 
 ```text
 pickleball_ml      imports nothing from this repository
-pickleball_api     imports neither pickleball_ml nor pickleball_worker
+pickleball_api     imports pickleball_ml.court.geometry and .spec, never pickleball_worker
 pickleball_worker  imports pickleball_api and pickleball_ml.video
 ```
 
-This is what keeps torch and ultralytics out of the API process. The worker
-imports only `pickleball_ml.video.reader`, and depends on `pickleball-ml`
-**without** its `tracking` extra: the base install is OpenCV, NumPy and the
-light libraries the pipeline modules import, while `ultralytics` (and through it
-torch) and `lap` are the extra, which the workspace root installs for the Phase 0
-CLI. So the worker image contains neither torch nor ultralytics, and a test
-asserts that importing the worker loads neither. The API
+This is what keeps torch and ultralytics out of the API process. Neither depends
+on anything else in `pickleball_ml`, and both depend on `pickleball-ml` **without**
+its `tracking` extra: the base install is OpenCV, NumPy and the light libraries the
+pipeline modules import, while `ultralytics` (and through it torch) and `lap` are
+the extra, which the workspace root installs for the Phase 0 CLI. So the image
+contains neither torch nor ultralytics, and a test on each side asserts that
+importing it loads neither.
+
+The API imports the geometry so that there is one homography implementation, and
+so a person gets their calibration's error straight back. Fitting a dozen points
+takes no meaningful time, unlike anything that decodes video, which stays in the
+worker. The cost is OpenCV in the API process. The image already has it, since the
+API and worker share a Dockerfile.
+
+The API
 enqueues by dotted path (`pickleball_worker.tasks.run_analysis_job`) rather than
 by importing the function, so the edge really does point one way.
 
@@ -85,7 +96,10 @@ by importing the function, so the edge really does point one way.
 | `POST` | `/api/matches` | Multipart upload (`file`). Creates a `Match`, its `Video` and a queued `AnalysisJob`. `201` |
 | `GET` | `/api/matches` | Matches newest first, each with its video and latest job. `limit`, `offset` |
 | `GET` | `/api/matches/{match_id}` | One match, its video and metadata, its latest job and every job attempt. `404` if unknown |
-| `POST` | `/api/matches/{match_id}/metadata-jobs` | Queue a metadata extraction job. `202` with the match; `409` if refused; `503` if it cannot be queued |
+| `POST` | `/api/matches/{match_id}/metadata-jobs` | Queue a job for a match with no metadata. `202` with the match; `409` if refused; `503` if it cannot be queued |
+| `POST` | `/api/matches/{match_id}/reference-frame-jobs` | Queue a job for a match with metadata but no calibration images. Answers as above |
+| `GET` | `/api/matches/{match_id}/reference-frames/{frame_id}` | One calibration image, as `image/jpeg`. `404` if unknown, under another match, or gone from storage |
+| `POST` | `/api/matches/{match_id}/calibrations` | Fit and save a calibration. `201` with the match; `409` if refused; `422` with a sentence if the landmarks cannot make a court |
 | `GET` | `/api/jobs/{job_id}` | Status, stage, progress, timestamps, failure code, `match_id`. `404` if unknown |
 | `GET` | `/health` | Liveness. Touches no dependency |
 | `GET` | `/ready` | Readiness. Checks the database and Redis; `503` if either is down |
@@ -137,11 +151,33 @@ over the average) is an estimate. `codec` is the stream's FourCC, or null.
 `can_extract_metadata` says whether `POST .../metadata-jobs` would be accepted
 right now, so the UI never offers an action the API will refuse.
 
-`MatchSummary` (each item of `GET /api/matches`) is the same without `jobs` and
-`can_extract_metadata`.
+`MatchDetail` also carries `reference_frames` (the background first), `calibration`
+(the one in force, or null), and `can_extract_reference_frames` and `can_calibrate`,
+which work like `can_extract_metadata`. A calibration has:
+
+```json
+{
+  "id": "…", "reference_frame_id": "…", "source": "manual",
+  "image_points": { "near_left_kitchen": [550.0, 633.0] },
+  "court_points": { "near_left_kitchen": [-10.0, -7.0] },
+  "homography": [[…], […], […]],
+  "reprojection_error_ft": { "near_left_kitchen": 0.08 },
+  "mean_reprojection_error_ft": 0.1, "max_reprojection_error_ft": 0.2,
+  "created_at": "…",
+  "projected_lines": { "near_baseline": [[76.2, 1020.1], [1794.8, 1024.9]] },
+  "warnings": []
+}
+```
+
+`homography` maps image pixels to court feet, and only means anything for a point
+on the ground. `projected_lines` and `warnings` are worked out when it is read:
+`projected_lines` is each court line's two ends in pixels, for an overlay, and
+`warnings` is fixed sentences for anything to review.
+
+`MatchSummary` (each item of `GET /api/matches`) is the same without `jobs`, the
+`can_*` flags, `reference_frames` and `calibration`.
 `video` is nullable in the schema because the database permits a match without
-one, but the upload path never produces it. The calibration will be added to
-`MatchDetail` when it exists; there is no placeholder field for it now.
+one, but the upload path never produces it.
 `storage_key` appears in no response, and a test checks the OpenAPI document
 for it.
 
@@ -151,7 +187,7 @@ has no room, `503` when the job cannot be queued.
 
 ## Data Model
 
-Three tables. `matches` is the parent:
+Five tables. `matches` is the parent:
 
 | Column | Notes |
 |---|---|
@@ -187,6 +223,18 @@ newest `created_at`, ties broken by `id`. A partial unique index,
 `ux_analysis_jobs_one_active_per_match`, allows at most one `queued` or
 `running` job per match; job history is unaffected.
 
+`reference_frames`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `ordinal` (display
+order, unique within a match), `kind` (`background` or `sample`), `position_seconds`
+(approximate; a CHECK requires it for a `sample` and forbids it for a `background`),
+`source_frame_count`, `storage_key` (unique, never returned), `width`, `height`,
+`byte_size`, `created_at`.
+
+`court_calibrations`: `id`, `match_id` and `reference_frame_id` (FKs, `ON DELETE
+CASCADE`), `source` (`manual`), `image_points`, `court_points`, `homography`,
+`reprojection_error_ft` (each JSON), `mean_reprojection_error_ft`,
+`max_reprojection_error_ft`, `created_at`. Indexed on `(match_id, created_at)`. Rows
+are only added: the newest is in force, so a recalibration destroys nothing.
+
 `status` and `stage` are stored as `VARCHAR` plus a CHECK constraint (added in
 migration `0002`) rather than native PostgreSQL enums, so that adding a member
 does not need a type migration and so the same migration runs on the SQLite
@@ -196,8 +244,8 @@ database the tests use.
 
 ### Relationship to `DATA_MODEL.md`
 
-`DATA_MODEL.md` describes `Match` owning a `VideoAsset` and a `ProcessingJob`,
-and that is now the shape here. `Video` is that `VideoAsset`, with its decoded
+`DATA_MODEL.md` describes `Match` owning a `VideoAsset`, a `ProcessingJob` and a
+`CourtCalibration`, and that is now the shape here. `Video` is that `VideoAsset`, with its decoded
 metadata columns named for what they hold (`average_fps`), and `AnalysisJob` is
 that `ProcessingJob`. `Match` has no `user_id` because there
 are no users.
@@ -214,11 +262,14 @@ does (`pickleball_api.jobs.transition`):
 | `ready` | `calibration_required` — unless it is already `court_ready` |
 | `failed` | `failed` |
 
-A new upload starts at `uploaded`. `court_ready` is reserved for the
-calibration checkpoint; nothing sets it yet. There is no `ready`, on purpose.
+A new upload starts at `uploaded`. There is no `ready`, on purpose. Saving a
+calibration sets `court_ready`, in the same commit, and that is the only change to
+a match's status that does not come from a job. Once a match has images a job
+cannot be started for it, so nothing moves a calibrated match to `failed`.
 
-`calibration_required` now also means "metadata extracted": the worker saves
-the metadata in the same commit as the `ready` transition that sets it.
+`calibration_required` also means "metadata extracted", and for any job finished
+since checkpoint 3 "calibration images exist": the worker saves both in the same
+commit as the `ready` transition that sets it.
 
 ### Retrying Extraction
 
@@ -240,6 +291,34 @@ reasons are `Match.metadata_job_refusal()`, and each has a fixed sentence.
   An integration test fires eight simultaneous requests at PostgreSQL and
   expects exactly one `202`.
 
+### Getting Calibration Images
+
+`POST /api/matches/{match_id}/reference-frame-jobs` covers a match with metadata
+and no images: one processed before they existed, or whose attempt failed. It is
+the same job an upload gets, so it reads the metadata again as well. It is refused
+with `409` when the match has no video, no metadata (`metadata-jobs` is the way in
+there), images already, or an active job. Nothing is enqueued from a migration.
+Concurrency, queue failure and history work as in Retrying Extraction.
+
+### Saving a Calibration
+
+`POST /api/matches/{match_id}/calibrations` takes `reference_frame_id` and
+`image_points`, keyed by landmark name, in that image's pixels. The match row is
+locked while it is checked. `409` when the match has no images or a job is active,
+and `422` with a fixed sentence when:
+
+- the image belongs to another match
+- there are fewer than four landmarks, or one is outside the image
+- the fit is underdetermined, as when all the landmarks but one are on one line
+- left and right are swapped. The camera's view of the court corners would run
+  clockwise, which no camera above the court can produce. This has to be its own
+  check because a mirrored court fits just as well, so no error can reveal it.
+
+A calibration that fits badly is saved and flagged rather than refused, because a
+person can look at the overlay and decide. `warnings` covers an error past 0.5 ft
+mean or 1.0 ft max (the worst careful Phase 0 calibration was 0.35 and 0.81), four
+landmarks, whose fit is always exact, and landmarks on only one half of the court.
+
 ### Job Status
 
 ```text
@@ -255,9 +334,10 @@ is the only way to change a status, and it raises `InvalidJobTransition` rather
 than writing a contradictory row; the worker treats that refusal as "another
 attempt already finished this" and leaves the first verdict alone.
 
-The stage names follow the ladder in `ARCHITECTURE.md`. Metadata extraction
-reaches `metadata_ready` and stops; the job stays at `ingested` while it runs,
-and only the task layer sets `metadata_ready`, once the metadata is saved.
+The stage names follow the ladder in `ARCHITECTURE.md`. A job reaches
+`metadata_ready` and stops; it stays at `ingested` while it runs, and only the task
+layer sets `metadata_ready`, once the result is saved. `court_ready` is not a job
+stage anything reaches, because a person calibrates the court and not a job.
 
 ## The Upload Path
 
@@ -314,6 +394,27 @@ id and nothing else: everything else is read from PostgreSQL (job -> match ->
 video), so the queue is not a channel through which paths or configuration can
 be injected. A job whose match has no video is failed with
 `missing_video_file` during the claim, without ever reaching `running`.
+
+### Calibration Images
+
+`CalibrationPreparationProcessor` runs `MetadataProcessor`, then seeks to 25 points
+spread evenly through the video, using the duration it just read. The per-pixel
+median of whatever decodes is the background, in which moving players vanish, and
+the frames nearest the quarter points are kept as stills, for a video whose camera
+moved and whose background is therefore smeared. All are JPEGs in display
+orientation, at the video's own size, so a pixel on one is a pixel in every later
+image coordinate. A seek is approximate, which is why a still records a position
+and not a frame number: the homography belongs to the camera, not to a moment.
+
+A processor cannot reach the database, so it writes the files and returns their keys,
+and the task layer records them in the same commit as the metadata and the `ready`
+transition. If that commit fails, or the job is no longer this attempt's to finish,
+the task layer deletes them, and a write that fails partway deletes what it wrote.
+A video with metadata but not one decodable frame fails with `unreadable_video`.
+
+Holding 25 frames takes about 155 MB at 1080p and 620 MB at 4K, and the median about
+as much again. Those are calculated, not measured. A 14:44 1080p clip took 4.2 s in
+total on an M4.
 
 ### Metadata Extraction
 
@@ -396,8 +497,8 @@ uv run alembic -c apps/api/alembic.ini revision --autogenerate -m "what changed"
 ```
 
 Alembic does not autogenerate CHECK constraints, so a change to `JobStatus`,
-`JobStage` or `MatchStatus` needs its migration written by hand; `0002` is the
-pattern.
+`JobStage`, `MatchStatus`, `ReferenceFrameKind` or `CalibrationSource` needs its
+migration written by hand; `0002` is the pattern.
 
 ### Migration 0003: introducing `matches`
 
@@ -438,6 +539,15 @@ now promises decoded metadata, which none of the matches backfilled by 0003 has
 matches show an **Extract metadata** action and wait for someone to use it. The
 downgrade drops the columns and index and leaves those statuses `uploaded`,
 which is valid at 0003 too.
+
+### Migrations 0005 and 0006: images and calibrations
+
+Each adds one table and touches no existing row. Nothing is enqueued, so a match
+that already has metadata shows a **Make calibration images** action. Downgrading
+0006 loses every calibration, and moves `court_ready` matches back to
+`calibration_required`, since that status promises a calibration exists. Downgrading
+0005 forgets the images, but their files stay in storage until something removes
+them.
 
 ## Dependencies and Processes
 
@@ -481,7 +591,7 @@ Video decoding is tested without the network or an ffmpeg binary.
 OpenCV, byte-for-byte deterministic, and can tag it with a rotation by patching
 the track header's display matrix -- which is where a phone records it. The
 worker's `stored_video` fixture stores one of these (64x48, tagged 90 degrees)
-and a test decodes it end to end, expecting 48x64. The processor's own tests
+and tests decode it end to end, expecting metadata and images at 48x64. The processor's own tests
 mock `read_metadata` where the processor looks it up
 (`pickleball_worker.processors.read_metadata`). The fake `ftyp` bytes the
 upload tests use are, correctly, *not* decodable; one test relies on that.
@@ -542,6 +652,11 @@ this one response is not in the usual error shape. Add the host to
 
 ## Security Notes
 
+A calibration image is served with a fixed `image/jpeg` type, `nosniff`, and
+`Content-Security-Policy: default-src 'none'; sandbox`. Its bytes come from the
+worker's own JPEG encoder, not from anything uploaded, and the route takes only
+ids, so no client value reaches a path.
+
 No authentication yet, so the API binds to `127.0.0.1` by default and
 `TrustedHostMiddleware` rejects unexpected `Host` headers -- without it, any page
 the user visits could reach a loopback API through a hostname that resolves to
@@ -557,26 +672,25 @@ logged with their traceback and answered with one sentence.
 
 Phase 1 is complete; everything below is later-phase work.
 
-**Remaining prerequisite for Phase 2 (court calibration).** The `Match`
-ownership model (checkpoint 1) and metadata extraction (checkpoint 2) are done.
-Still to build before the calibration UI itself:
-
-- Serving uploaded video back to the browser, which needs its own decisions
-  about origin, `Content-Disposition` and `X-Content-Type-Options`; an mp4 that
-  is also valid HTML is a stored-XSS vector if it is served from the app's own
-  origin. Clicking landmarks on a frame requires this.
+**Video playback, now Phase 5.** Serving uploaded video back to the browser needs
+its own decisions about origin, `Content-Disposition` and `X-Content-Type-Options`;
+an mp4 that is also valid HTML is a stored-XSS vector if it is served from the app's
+own origin. Calibration turned out not to need it.
 
 Known gaps in what is here:
 
 - **Retries are manual.** A failed extraction is retried by
   `POST .../metadata-jobs`, which adds a new job; nothing retries
   automatically, and the `failed -> queued` transition on an existing job is
-  still unused. Once metadata exists there is no way to extract it again.
+  still unused. Once metadata and images exist there is no way to make them again.
 - **No authentication or per-user authorization.** Every match is visible to
   anyone who can reach the port.
 - **Nothing edits a match.** `name` and `recorded_at` are set at upload and
   there is no endpoint to change them.
-- **No deletion endpoint**, which `ARCHITECTURE.md` requires for privacy.
+- **No deletion endpoint**, which `ARCHITECTURE.md` requires for privacy. Calibration
+  images are personal data too, since a still shows the players.
+- **A camera that moved is not detected.** One calibration cannot be right on both
+  sides of a move; the calibration page warns about it, but nothing checks.
 - **The size limit bounds what is stored more tightly than what is buffered.**
   An upload declaring an oversized `Content-Length` is refused by middleware
   before the body is read, which covers every ordinary client. A chunked

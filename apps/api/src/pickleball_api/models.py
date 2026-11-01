@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     DateTime,
@@ -75,8 +76,7 @@ class MatchStatus(enum.StrEnum):
     #: Processing finished; the court has to be calibrated before anything
     #: that needs court coordinates can run.
     CALIBRATION_REQUIRED = "calibration_required"
-    #: A court calibration exists. Nothing sets this until the calibration
-    #: checkpoint lands; it is here so the vocabulary does not change then.
+    #: A court calibration exists.
     COURT_READY = "court_ready"
     #: The latest processing attempt failed.
     FAILED = "failed"
@@ -98,13 +98,45 @@ class MetadataJobRefusal(enum.StrEnum):
     ALREADY_EXTRACTED = "already_extracted"
 
 
+class ReferenceFrameJobRefusal(enum.StrEnum):
+    """Why a match that has metadata cannot be given calibration images."""
+
+    NO_VIDEO = "no_video"
+    NO_METADATA = "no_metadata"
+    JOB_ACTIVE = "job_active"
+    ALREADY_EXTRACTED = "already_extracted"
+
+
+class CalibrationRefusal(enum.StrEnum):
+    """Why a match cannot be calibrated right now."""
+
+    NO_REFERENCE_FRAMES = "no_reference_frames"
+    JOB_ACTIVE = "job_active"
+
+
+class ReferenceFrameKind(enum.StrEnum):
+    """How a calibration image was made."""
+
+    #: The per-pixel median of frames across the video. Moving players vanish,
+    #: so this is the one to calibrate on unless the camera moved.
+    BACKGROUND = "background"
+    #: One frame as it was decoded.
+    SAMPLE = "sample"
+
+
+class CalibrationSource(enum.StrEnum):
+    """Who placed a calibration's landmarks."""
+
+    MANUAL = "manual"
+
+
 class JobStage(enum.StrEnum):
     """Pipeline stage a job has reached.
 
-    The names follow the stage sequence in `docs/ARCHITECTURE.md`. Checkpoint 1
-    only reaches `METADATA_READY`, because the processor is a placeholder; the
-    later stages are listed so the column's meaning does not change when the
-    real computer-vision stages are wired in.
+    The names follow the stage sequence in `docs/ARCHITECTURE.md`. Jobs only
+    reach `METADATA_READY` today, because reading the video is all the worker
+    does; the later stages are listed so the column's meaning does not change
+    when the real computer-vision stages are wired in.
     """
 
     INGESTED = "ingested"
@@ -161,6 +193,23 @@ class Match(Base):
         order_by="AnalysisJob.created_at, AnalysisJob.id",
     )
 
+    reference_frames: Mapped[list["ReferenceFrame"]] = relationship(
+        back_populates="match",
+        cascade="all, delete-orphan",
+        order_by="ReferenceFrame.ordinal",
+    )
+    calibrations: Mapped[list["CourtCalibration"]] = relationship(
+        back_populates="match",
+        cascade="all, delete-orphan",
+        order_by="CourtCalibration.created_at, CourtCalibration.id",
+    )
+
+    @property
+    def latest_calibration(self) -> "CourtCalibration | None":
+        """The calibration in force. Earlier ones stay, so a recalibration
+        never destroys what was there before it."""
+        return self.calibrations[-1] if self.calibrations else None
+
     @property
     def latest_job(self) -> "AnalysisJob | None":
         """The most recently created job, which is the one the UI should show.
@@ -191,6 +240,39 @@ class Match(Base):
     @property
     def can_extract_metadata(self) -> bool:
         return self.metadata_job_refusal() is None
+
+    def reference_frame_job_refusal(self) -> ReferenceFrameJobRefusal | None:
+        """Why a job for calibration images may not start, or None if it may.
+
+        For a match whose metadata was extracted before calibration images
+        existed, or whose attempt at them failed. A match with no metadata goes
+        through `metadata_job_refusal` instead, because any job produces both.
+        """
+        if self.video is None:
+            return ReferenceFrameJobRefusal.NO_VIDEO
+        if any(job.status in ACTIVE_JOB_STATUSES for job in self.jobs):
+            return ReferenceFrameJobRefusal.JOB_ACTIVE
+        if self.video.metadata_extracted_at is None:
+            return ReferenceFrameJobRefusal.NO_METADATA
+        if self.reference_frames:
+            return ReferenceFrameJobRefusal.ALREADY_EXTRACTED
+        return None
+
+    @property
+    def can_extract_reference_frames(self) -> bool:
+        return self.reference_frame_job_refusal() is None
+
+    def calibration_refusal(self) -> CalibrationRefusal | None:
+        """Why a calibration may not be saved, or None if it may."""
+        if any(job.status in ACTIVE_JOB_STATUSES for job in self.jobs):
+            return CalibrationRefusal.JOB_ACTIVE
+        if not self.reference_frames:
+            return CalibrationRefusal.NO_REFERENCE_FRAMES
+        return None
+
+    @property
+    def can_calibrate(self) -> bool:
+        return self.calibration_refusal() is None
 
 
 @dataclass(frozen=True)
@@ -304,6 +386,104 @@ class Video(Base):
             codec=self.codec,
             extracted_at=self.metadata_extracted_at,
         )
+
+
+class ReferenceFrame(Base):
+    """A still from the video, for placing calibration landmarks on.
+
+    Generated by the worker, in display orientation, so a pixel on it is a pixel
+    in every later image coordinate. Its size is stored because the size is what
+    the browser needs to turn a click into a pixel.
+    """
+
+    __tablename__ = "reference_frames"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    match_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("matches.id", ondelete="CASCADE", name="fk_reference_frames_match_id_matches")
+    )
+    #: Display order: the background first.
+    ordinal: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[ReferenceFrameKind] = mapped_column(
+        _enum_column(ReferenceFrameKind, "reference_frame_kind")
+    )
+    #: About where in the video a sample came from. Null for a background,
+    #: which comes from no single moment.
+    position_seconds: Mapped[float | None] = mapped_column(Float, default=None)
+    #: How many decoded frames went into this image.
+    source_frame_count: Mapped[int] = mapped_column(Integer)
+    storage_key: Mapped[str] = mapped_column(String(512), unique=True)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    byte_size: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, server_default=func.now()
+    )
+
+    match: Mapped[Match] = relationship(back_populates="reference_frames")
+
+    __table_args__ = (
+        UniqueConstraint("match_id", "ordinal", name="uq_reference_frames_match_id_ordinal"),
+        CheckConstraint("width > 0", name="ck_reference_frames_width_positive"),
+        CheckConstraint("height > 0", name="ck_reference_frames_height_positive"),
+        CheckConstraint("byte_size >= 0", name="ck_reference_frames_byte_size_non_negative"),
+        CheckConstraint(
+            "source_frame_count > 0", name="ck_reference_frames_source_frame_count_positive"
+        ),
+        CheckConstraint(
+            "(kind = 'background' AND position_seconds IS NULL)"
+            " OR (kind = 'sample' AND position_seconds IS NOT NULL)",
+            name="ck_reference_frames_position_matches_kind",
+        ),
+    )
+
+
+class CourtCalibration(Base):
+    """Landmarks placed on a reference frame, and the homography fitted to them.
+
+    Never updated: a new calibration is a new row, and the newest is the one in
+    force. `homography` maps image pixels to court feet.
+    """
+
+    __tablename__ = "court_calibrations"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    match_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("matches.id", ondelete="CASCADE", name="fk_court_calibrations_match_id_matches")
+    )
+    reference_frame_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "reference_frames.id",
+            ondelete="CASCADE",
+            name="fk_court_calibrations_reference_frame_id_reference_frames",
+        )
+    )
+    source: Mapped[CalibrationSource] = mapped_column(
+        _enum_column(CalibrationSource, "calibration_source"), default=CalibrationSource.MANUAL
+    )
+    #: Keyed by landmark name, as [x, y]: pixels, then feet.
+    image_points: Mapped[dict[str, list[float]]] = mapped_column(JSON)
+    court_points: Mapped[dict[str, list[float]]] = mapped_column(JSON)
+    homography: Mapped[list[list[float]]] = mapped_column(JSON)
+    #: Keyed by landmark name, in feet.
+    reprojection_error_ft: Mapped[dict[str, float]] = mapped_column(JSON)
+    mean_reprojection_error_ft: Mapped[float] = mapped_column(Float)
+    max_reprojection_error_ft: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, server_default=func.now()
+    )
+
+    match: Mapped[Match] = relationship(back_populates="calibrations")
+
+    __table_args__ = (
+        CheckConstraint(
+            "mean_reprojection_error_ft >= 0", name="ck_court_calibrations_mean_error_non_negative"
+        ),
+        CheckConstraint(
+            "max_reprojection_error_ft >= 0", name="ck_court_calibrations_max_error_non_negative"
+        ),
+        Index("ix_court_calibrations_match_id_created_at", "match_id", "created_at"),
+    )
 
 
 class AnalysisJob(Base):

@@ -3,9 +3,12 @@ name = "pickleball-api"
 version = "0.1.0"
 description = "FastAPI service: video uploads, analysis jobs, and their status"
 requires-python = ">=3.13,<3.14"
+# pickleball-ml without the `tracking` extra, for the court geometry: OpenCV and
+# NumPy, never torch. A test asserts that importing the API loads no model library.
 dependencies = [
     "alembic>=1.14",
     "fastapi>=0.115",
+    "pickleball-ml",
     "psycopg[binary]>=3.2",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
