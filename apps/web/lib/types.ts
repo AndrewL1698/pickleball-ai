@@ -11,9 +11,9 @@
 
 /**
  * Where a match is in its lifecycle. There is deliberately no generic "ready":
- * a finished file check is `calibration_required`, because nothing about the
- * match has been analysed and the court still has to be calibrated.
- * `court_ready` is reserved; nothing sets it until calibration lands.
+ * a finished job leaves a match `calibration_required`, because nothing about
+ * it has been analysed and the court still has to be calibrated, and saving a
+ * calibration makes it `court_ready`.
  */
 export const MATCH_STATUSES = [
   "uploaded",
@@ -93,6 +93,74 @@ export interface Video {
   metadata: VideoMetadata | null;
 }
 
+/** How a calibration image was made. */
+export const REFERENCE_FRAME_KINDS = ["background", "sample"] as const;
+export type ReferenceFrameKind = (typeof REFERENCE_FRAME_KINDS)[number];
+
+/** A still from the video, to place calibration landmarks on. */
+export interface ReferenceFrame {
+  id: string;
+  kind: ReferenceFrameKind;
+  /** About where it came from, in seconds. Null for a background, from no single moment. */
+  position_seconds: number | null;
+  source_frame_count: number;
+  /** The image's own pixels, which are the video's in display orientation. */
+  width: number;
+  height: number;
+  created_at: string;
+}
+
+/** Who placed a calibration's landmarks. */
+export const CALIBRATION_SOURCES = ["manual"] as const;
+export type CalibrationSource = (typeof CALIBRATION_SOURCES)[number];
+
+/** The painted intersections a calibration can use, in the order they are asked for. */
+export const LANDMARK_NAMES = [
+  "near_left_baseline_corner",
+  "near_center_baseline",
+  "near_right_baseline_corner",
+  "near_left_kitchen",
+  "near_center_kitchen",
+  "near_right_kitchen",
+  "far_left_kitchen",
+  "far_center_kitchen",
+  "far_right_kitchen",
+  "far_left_baseline_corner",
+  "far_center_baseline",
+  "far_right_baseline_corner",
+] as const;
+export type LandmarkName = (typeof LANDMARK_NAMES)[number];
+
+/** What `POST /api/matches/{id}/calibrations` takes. Points are in the frame's pixels. */
+export interface CalibrationRequest {
+  reference_frame_id: string;
+  image_points: Partial<Record<LandmarkName, readonly [number, number]>>;
+}
+
+/**
+ * A fitted calibration. `homography` maps image pixels to court feet, and only
+ * means anything for a point on the ground. The error says how well the landmarks
+ * agree with each other, not how accurate a position will be.
+ */
+export interface CourtCalibration {
+  id: string;
+  reference_frame_id: string;
+  source: CalibrationSource;
+  /** Pixels, keyed by landmark. Only the landmarks that were placed. */
+  image_points: Record<string, [number, number]>;
+  /** Feet, keyed by landmark. */
+  court_points: Record<string, [number, number]>;
+  homography: number[][];
+  reprojection_error_ft: Record<string, number>;
+  mean_reprojection_error_ft: number;
+  max_reprojection_error_ft: number;
+  created_at: string;
+  /** Each court line's two ends in image pixels, for drawing an overlay. */
+  projected_lines: Record<string, [[number, number], [number, number]]>;
+  /** Fixed sentences for anything to review. Empty when there is nothing. */
+  warnings: string[];
+}
+
 /** A match in a list, with its video and the status of its most recent job. */
 export interface MatchSummary {
   id: string;
@@ -117,6 +185,14 @@ export interface MatchDetail extends MatchSummary {
    * the UI only offers the action when this is true.
    */
   can_extract_metadata: boolean;
+  /** Whether the API would accept a job for calibration images right now. */
+  can_extract_reference_frames: boolean;
+  /** Whether the API would accept a calibration right now. */
+  can_calibrate: boolean;
+  /** Stills to calibrate on, the background first. Empty until a job makes them. */
+  reference_frames: ReferenceFrame[];
+  /** The calibration in force, or null if the court has not been calibrated. */
+  calibration: CourtCalibration | null;
 }
 
 export interface MatchList {

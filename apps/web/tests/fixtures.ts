@@ -6,7 +6,15 @@
  */
 
 import { type ReactNode, createElement } from "react";
-import type { Job, MatchDetail, MatchSummary, Video, VideoMetadata } from "@/lib/types";
+import type {
+  CourtCalibration,
+  Job,
+  MatchDetail,
+  MatchSummary,
+  ReferenceFrame,
+  Video,
+  VideoMetadata,
+} from "@/lib/types";
 
 export const JOB_QUEUED: Job = {
   id: "4fc1f817-fe2d-4279-a0be-87125fd6c733",
@@ -82,6 +90,88 @@ export const MATCH_DETAIL: MatchDetail = {
   ...MATCH_SUMMARY,
   jobs: [JOB_QUEUED],
   can_extract_metadata: false,
+  can_extract_reference_frames: false,
+  can_calibrate: false,
+  reference_frames: [],
+  calibration: null,
+};
+
+export const REFERENCE_FRAME: ReferenceFrame = {
+  id: "9a8b7c6d-1111-4222-8333-444455556666",
+  kind: "background",
+  position_seconds: null,
+  source_frame_count: 25,
+  width: 1920,
+  height: 1080,
+  created_at: "2026-10-31T18:00:55.310000Z",
+};
+
+export const SAMPLE_FRAME: ReferenceFrame = {
+  ...REFERENCE_FRAME,
+  id: "9a8b7c6d-1111-4222-8333-444455557777",
+  kind: "sample",
+  position_seconds: 188.6,
+  source_frame_count: 1,
+};
+
+/**
+ * An affine homography, not a real camera: X = x - 960, Y = 500 - y, w = 1.
+ * Simple enough that a test can work out by hand what any pixel should come to.
+ */
+export const COURT_CALIBRATION: CourtCalibration = {
+  id: "aaaa1111-2222-4333-8444-555566667777",
+  reference_frame_id: REFERENCE_FRAME.id,
+  source: "manual",
+  image_points: {
+    near_left_kitchen: [660, 800],
+    near_right_kitchen: [1260, 800],
+    far_left_kitchen: [760, 400],
+    far_right_kitchen: [1160, 400],
+    near_left_baseline_corner: [400, 1000],
+  },
+  court_points: {
+    near_left_kitchen: [-10, -7],
+    near_right_kitchen: [10, -7],
+    far_left_kitchen: [-10, 7],
+    far_right_kitchen: [10, 7],
+    near_left_baseline_corner: [-10, -22],
+  },
+  homography: [
+    [1, 0, -960],
+    [0, -1, 500],
+    [0, 0, 1],
+  ],
+  reprojection_error_ft: {
+    near_left_kitchen: 0.31,
+    near_right_kitchen: 0.12,
+    far_left_kitchen: 0.2,
+    far_right_kitchen: 0.14,
+    near_left_baseline_corner: 0.4,
+  },
+  mean_reprojection_error_ft: 0.234,
+  max_reprojection_error_ft: 0.4,
+  created_at: "2026-10-31T18:05:00.000000Z",
+  projected_lines: {
+    near_baseline: [[400, 1000], [1520, 1000]],
+    net: [[700, 500], [1220, 500]],
+  },
+  warnings: [],
+};
+
+export const CALIBRATABLE_MATCH: MatchDetail = {
+  ...MATCH_DETAIL,
+  status: "calibration_required",
+  video: { ...VIDEO, metadata: VIDEO_METADATA },
+  latest_job: JOB_READY,
+  jobs: [JOB_READY],
+  can_calibrate: true,
+  reference_frames: [REFERENCE_FRAME, SAMPLE_FRAME],
+};
+
+export const CALIBRATED_MATCH: MatchDetail = {
+  ...CALIBRATABLE_MATCH,
+  status: "court_ready",
+  calibration: COURT_CALIBRATION,
 };
 
 /** A `Response` the way the API sends one. */

@@ -30,8 +30,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         </main>
         <footer className="border-t border-border-subtle px-4 py-6 text-sm text-muted">
           <p className="mx-auto max-w-3xl">
-            Phase 2 prototype. Matches are uploaded and their video metadata extracted; court
-            calibration and match analysis are not available yet.
+            Phase 2 prototype. Matches are uploaded, their video metadata extracted and their
+            court calibrated by hand; match analysis is not available yet.
           </p>
         </footer>
       </body>

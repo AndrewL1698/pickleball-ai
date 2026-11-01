@@ -61,12 +61,12 @@ describe("status copy", () => {
   });
 
   it("describes a finished job as metadata, never as an analysed match", () => {
-    expect(STATUS_COPY.ready.description).toMatch(/metadata only/i);
-    expect(MATCH_STATUS_COPY.calibration_required.description).toMatch(/metadata has been extracted/i);
+    expect(STATUS_COPY.ready.description).toMatch(/video metadata and calibration images/i);
+    expect(MATCH_STATUS_COPY.calibration_required.description).toMatch(/calibrated next/i);
   });
 
-  it("admits calibration is not available yet", () => {
-    expect(MATCH_STATUS_COPY.calibration_required.description).toMatch(/not available/i);
+  it("admits what a calibrated court still does not have", () => {
+    expect(MATCH_STATUS_COPY.court_ready.description).toMatch(/not available/i);
   });
 
   it("never describes a ready job as an analysed match", () => {

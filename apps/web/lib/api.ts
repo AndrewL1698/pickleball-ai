@@ -9,6 +9,7 @@
 
 import type {
   ApiErrorBody,
+  CalibrationRequest,
   Job,
   MatchDetail,
   MatchList,
@@ -128,6 +129,40 @@ export function startMetadataJob(matchId: string, signal?: AbortSignal): Promise
   // No body and no headers, so this stays a CORS simple request.
   return request<MatchDetail>(`/api/matches/${encodeURIComponent(matchId)}/metadata-jobs`, {
     method: "POST",
+    signal,
+  });
+}
+
+/**
+ * Queue a job for calibration images, for a match whose metadata exists but
+ * which has none. Answers 409 and 503 as `startMetadataJob` does.
+ */
+export function startReferenceFrameJob(matchId: string, signal?: AbortSignal): Promise<MatchDetail> {
+  return request<MatchDetail>(
+    `/api/matches/${encodeURIComponent(matchId)}/reference-frame-jobs`,
+    { method: "POST", signal },
+  );
+}
+
+/** Where a calibration image is served from, for an `<img>` to load. */
+export function referenceFrameUrl(matchId: string, frameId: string): string {
+  return `${API_BASE_URL}/api/matches/${encodeURIComponent(matchId)}/reference-frames/${encodeURIComponent(frameId)}`;
+}
+
+/**
+ * Save a calibration. The API fits it and answers with the updated match, or
+ * 422 with a sentence saying why these landmarks cannot make a court.
+ */
+export function createCalibration(
+  matchId: string,
+  calibration: CalibrationRequest,
+  signal?: AbortSignal,
+): Promise<MatchDetail> {
+  // JSON makes this a preflighted request, which the API's CORS settings allow.
+  return request<MatchDetail>(`/api/matches/${encodeURIComponent(matchId)}/calibrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(calibration),
     signal,
   });
 }
