@@ -152,6 +152,26 @@ def projected_court_lines(homography: list[list[float]]) -> dict[str, list[tuple
     return lines
 
 
+def far_baseline_feet_per_pixel(homography: list[list[float]]) -> float | None:
+    """The most one image pixel can be worth along the far baseline, in feet.
+
+    A misplaced landmark costs the most here, and the fit error cannot show it when
+    a whole row of clicks is off together. Taken over the line's ends and center,
+    in the pixel direction that costs the most. None if the line cannot be projected.
+    """
+    image_to_court = np.array(homography, dtype=np.float64)
+    far = np.array([(x, HALF_LENGTH_FT) for x in (-HALF_WIDTH_FT, 0.0, HALF_WIDTH_FT)])
+    pixels = apply_homography(np.linalg.inv(image_to_court), far)
+    if not np.all(np.isfinite(pixels)):
+        return None
+    worst = 0.0
+    for pixel, court in zip(pixels, far, strict=True):
+        # One pixel right and one pixel down, as feet moved on the court.
+        moved = apply_homography(image_to_court, pixel + np.eye(2)) - court
+        worst = max(worst, float(np.linalg.norm(moved, 2)))
+    return worst
+
+
 def calibration_warnings(
     court_points: Mapping[str, tuple[float, float]], mean_error_ft: float, max_error_ft: float
 ) -> list[str]:

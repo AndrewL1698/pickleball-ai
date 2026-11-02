@@ -11,7 +11,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, computed_field
 
-from pickleball_api.calibration import CourtLandmark, calibration_warnings, projected_court_lines
+from pickleball_api.calibration import (
+    CourtLandmark,
+    calibration_warnings,
+    far_baseline_feet_per_pixel,
+    projected_court_lines,
+)
 from pickleball_api.models import (
     AnalysisJob,
     CalibrationSource,
@@ -67,6 +72,15 @@ class VideoMetadataRead(BaseModel):
     extracted_at: datetime
 
 
+class CameraJumpRead(BaseModel):
+    """The camera moved somewhere between these two sampled moments."""
+
+    from_seconds: float
+    to_seconds: float
+    #: How far the picture shifted, in the video's pixels.
+    shift_px: float
+
+
 class VideoRead(BaseModel):
     """The stored video behind a match, minus where it is stored."""
 
@@ -80,6 +94,9 @@ class VideoRead(BaseModel):
     #: Null until a processing job has decoded the video -- including every
     #: video uploaded before metadata extraction existed. Never zero-filled.
     metadata: VideoMetadataRead | None = Field(validation_alias="decoded_metadata")
+    #: Where sampled frames show the camera moved. Empty means none was found, and
+    #: null means not checked. A move and back between two samples would not show.
+    camera_jumps: list[CameraJumpRead] | None
 
 
 class MatchSummary(BaseModel):
@@ -155,6 +172,12 @@ class CalibrationRead(BaseModel):
     def projected_lines(self) -> dict[str, list[tuple[float, float]]]:
         """Each court line's two ends in image pixels, for drawing an overlay."""
         return projected_court_lines(self.homography)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def far_baseline_ft_per_pixel(self) -> float | None:
+        """The most one image pixel can be worth at the far baseline, in feet."""
+        return far_baseline_feet_per_pixel(self.homography)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

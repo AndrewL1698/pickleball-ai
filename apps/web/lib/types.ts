@@ -82,6 +82,14 @@ export interface VideoMetadata {
   extracted_at: string;
 }
 
+/** The camera moved somewhere between these two sampled moments. */
+export interface CameraJump {
+  from_seconds: number;
+  to_seconds: number;
+  /** How far the picture shifted, in the video's pixels. */
+  shift_px: number;
+}
+
 /** The stored video behind a match. */
 export interface Video {
   id: string;
@@ -91,6 +99,8 @@ export interface Video {
   created_at: string;
   /** Null until a job has decoded it; never zero-filled. */
   metadata: VideoMetadata | null;
+  /** Empty means checked and no move found. Null means not checked. */
+  camera_jumps: CameraJump[] | null;
 }
 
 /** How a calibration image was made. */
@@ -157,6 +167,8 @@ export interface CourtCalibration {
   created_at: string;
   /** Each court line's two ends in image pixels, for drawing an overlay. */
   projected_lines: Record<string, [[number, number], [number, number]]>;
+  /** The most one image pixel can be worth at the far baseline, in feet. */
+  far_baseline_ft_per_pixel: number | null;
   /** Fixed sentences for anything to review. Empty when there is nothing. */
   warnings: string[];
 }

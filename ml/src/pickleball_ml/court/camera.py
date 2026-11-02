@@ -32,6 +32,10 @@ from pickleball_ml.video.reader import Frame, sample_frames
 MIN_PLAUSIBLE_HFOV_DEG = 20.0
 MAX_PLAUSIBLE_HFOV_DEG = 130.0
 
+#: A step between samples past this is a moved camera, not drift. At 25 samples per
+#: video the five test clips step at most 6.7 px, and `riggs` jumps 107 px when moved.
+CAMERA_JUMP_PX = 20.0
+
 
 def focal_from_homography(image_to_court: FloatArray, width: int, height: int) -> float | None:
     """Focal length in pixels from the two orthonormality constraints on the rotation.
@@ -222,7 +226,7 @@ def _displacement(
     return float(np.max(np.linalg.norm(moved - probe, axis=1)) / a[2])
 
 
-def summarize_drift(samples: list[DriftSample], jump_px: float = 20.0) -> dict[str, Any]:
+def summarize_drift(samples: list[DriftSample], jump_px: float = CAMERA_JUMP_PX) -> dict[str, Any]:
     drift = np.array([s.drift_px for s in samples if s.drift_px is not None], dtype=float)
     jumps = [{"time_s": round(s.time_s, 1), "step_px": round(s.step_px, 1)} for s in samples
              if s.step_px is not None and s.step_px > jump_px]

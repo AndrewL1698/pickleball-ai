@@ -22,6 +22,7 @@ configuration can be injected.
 """
 
 import logging
+from dataclasses import asdict
 from typing import Any
 from uuid import UUID
 
@@ -182,6 +183,9 @@ def _complete(job_id: UUID, result: ProcessingResult) -> bool:
         video.frame_count = metadata.frame_count
         video.codec = metadata.codec
         video.metadata_extracted_at = utcnow()
+        video.camera_jumps = (
+            None if result.camera_jumps is None else [asdict(jump) for jump in result.camera_jumps]
+        )
         job.match.reference_frames.extend(
             ReferenceFrame(
                 ordinal=ordinal,

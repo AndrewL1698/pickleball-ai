@@ -2,10 +2,10 @@
 
 The default processor reads the video's metadata -- dimensions, rotation,
 average frame rate, duration, frame count, codec -- and writes the stills a
-person places calibration landmarks on, with `pickleball_ml.video.reader`. That
-is all it does: nothing in a frame is analysed, and no model is loaded. Only the
-lightweight video module is imported, never anything that pulls in torch or YOLO
-weights.
+person places calibration landmarks on, with `pickleball_ml.video.reader`, and
+checks those frames for a moved camera. That is all it does: nothing about play
+is analysed, and no model is loaded. Only the lightweight video and court modules
+are imported, never anything that pulls in torch or YOLO weights.
 
 A processor is handed a `VideoRef`, not the ORM object, and returns a typed
 `ProcessingResult`. It works through `Storage` and reports progress through a
@@ -17,12 +17,14 @@ not have to change shape.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from itertools import pairwise
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 from pickleball_api.errors import JobErrorCode, JobFailure
 from pickleball_api.models import JobStage, ReferenceFrameKind
 from pickleball_api.storage import ObjectNotFound, Storage, new_storage_key
+from pickleball_ml.court.camera import CAMERA_JUMP_PX, camera_drift
 from pickleball_ml.video.reader import (
     Frame,
     VideoReadError,
@@ -91,12 +93,24 @@ class StoredStill:
 
 
 @dataclass(frozen=True)
+class CameraJump:
+    """The camera moved somewhere between two neighbouring sampled frames."""
+
+    from_seconds: float
+    to_seconds: float
+    #: How far the picture shifted, in the video's pixels.
+    shift_px: float
+
+
+@dataclass(frozen=True)
 class ProcessingResult:
     """A successful pass over a video, for the task layer to persist."""
 
     metadata: ExtractedMetadata
     #: Already in storage. The task layer records them, or deletes them.
     stills: tuple[StoredStill, ...] = ()
+    #: Empty means checked and no move found. None means it could not be checked.
+    camera_jumps: tuple[CameraJump, ...] | None = None
     #: A small record for the job log; never shown to a user.
     summary: dict[str, Any] = field(default_factory=dict)
 
@@ -178,7 +192,7 @@ class CalibrationPreparationProcessor:
     """
 
     name = "calibration_preparation"
-    version = "1"
+    version = "2"
 
     def process(
         self, video: VideoRef, storage: Storage, report: ProgressReporter
@@ -192,6 +206,7 @@ class CalibrationPreparationProcessor:
         frames = _decode_samples(video, storage, metadata.duration_seconds, report)
         report(JobStage.INGESTED, 0.8)
 
+        camera_jumps = _camera_jumps(frames)
         images = _stills_from(frames)
         stored: list[StoredStill] = []
         try:
@@ -205,6 +220,7 @@ class CalibrationPreparationProcessor:
         return ProcessingResult(
             metadata=metadata,
             stills=tuple(stored),
+            camera_jumps=camera_jumps,
             summary={
                 "processor": self.name,
                 "processor_version": self.version,
@@ -236,6 +252,25 @@ def _decode_samples(
     if not frames:
         raise JobFailure(JobErrorCode.UNREADABLE_VIDEO, "no frame could be decoded")
     return frames
+
+
+def _camera_jumps(frames: list[tuple[float, Frame]]) -> tuple[CameraJump, ...] | None:
+    """Where neighbouring frames show the camera moved.
+
+    A pair that could not be compared might be hiding a move, so "no move found"
+    needs every pair to have been compared. A move that was found stands regardless.
+    """
+    samples = camera_drift(frames)
+    jumps = tuple(
+        CameraJump(before.time_s, after.time_s, after.step_px)
+        for before, after in pairwise(samples)
+        if after.step_px is not None and after.step_px > CAMERA_JUMP_PX
+    )
+    if jumps:
+        return jumps
+    if len(samples) < 2 or any(sample.step_px is None for sample in samples[1:]):
+        return None
+    return ()
 
 
 def _stills_from(

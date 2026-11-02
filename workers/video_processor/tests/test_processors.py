@@ -8,12 +8,14 @@ file and no database. The real decode is covered in `test_tasks.py`.
 import uuid
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
 from pickleball_api.errors import JobErrorCode, JobFailure
 from pickleball_api.models import JobStage
 from pickleball_api.storage import LocalFileStorage, new_storage_key
+from pickleball_ml.court.camera import DriftSample
 from pickleball_ml.video.reader import InvalidVideoMetadata, VideoMetadata, VideoReadError
 from pickleball_worker import processors
 from pickleball_worker.processors import (
@@ -241,6 +243,64 @@ def test_a_failed_write_leaves_no_stills_behind(
     with pytest.raises(OSError, match="disk full"):
         prepare(ref, storage)
     assert stored_jpegs(storage) == []
+
+
+def textured_frame(shift: int = 0) -> np.ndarray:
+    """Something ORB can track: smooth blobs, moved `shift` pixels to the right."""
+    blobs = np.random.default_rng(7).integers(0, 255, (45, 80, 3), dtype=np.uint8)
+    image = cv2.resize(blobs, (1280, 720), interpolation=cv2.INTER_CUBIC)
+    return np.roll(cv2.GaussianBlur(image, (0, 0), 2), shift, axis=1)
+
+
+def test_a_moved_camera_is_found_between_the_frames_either_side_of_it() -> None:
+    frames = [(float(t), textured_frame(0 if t < 30 else 80)) for t in (0, 10, 20, 30, 40)]
+    jumps = processors._camera_jumps(frames)
+    assert jumps is not None and len(jumps) == 1
+    assert (jumps[0].from_seconds, jumps[0].to_seconds) == (20.0, 30.0)
+    assert jumps[0].shift_px == pytest.approx(80, abs=2)
+
+
+def test_a_steady_camera_was_checked_and_has_no_jumps() -> None:
+    frames = [(float(t), textured_frame()) for t in range(4)]
+    assert processors._camera_jumps(frames) == ()
+
+
+def test_frames_with_nothing_to_compare_were_not_checked() -> None:
+    assert processors._camera_jumps(fake_frames(5)) is None
+
+
+def test_one_frame_cannot_show_a_move() -> None:
+    assert processors._camera_jumps([(0.0, textured_frame())]) is None
+
+
+@pytest.mark.parametrize(
+    ("steps", "expected"),
+    [
+        ((1.0, None, 2.0), None),
+        ((1.0, None, 90.0), 1),
+    ],
+)
+def test_a_pair_that_cannot_be_compared_rules_out_no_move_but_not_a_found_one(
+    steps: tuple[float | None, ...], expected: int | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    samples = [DriftSample(0.0, 0.0, None)]
+    samples += [DriftSample(float(i + 1), 0.0, step) for i, step in enumerate(steps)]
+    monkeypatch.setattr(processors, "camera_drift", lambda frames: samples)
+    jumps = processors._camera_jumps([])
+    assert (None if jumps is None else len(jumps)) == expected
+
+
+def test_preparing_a_video_returns_the_camera_check(
+    ref: VideoRef, storage: LocalFileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(processors, "read_metadata", lambda path: decoded())
+    monkeypatch.setattr(
+        processors,
+        "sample_frames",
+        lambda path, seconds: [(float(i), textured_frame(i * 60)) for i in range(3)],
+    )
+    jumps = prepare(ref, storage).camera_jumps
+    assert jumps is not None and len(jumps) == 2
 
 
 def test_the_worker_does_not_import_torch_or_ultralytics() -> None:

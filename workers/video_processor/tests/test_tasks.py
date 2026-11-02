@@ -22,6 +22,7 @@ from pickleball_api.storage import LocalFileStorage, Storage, new_storage_key
 from pickleball_api.testing import video_bytes
 from pickleball_worker.processors import (
     CalibrationPreparationProcessor,
+    CameraJump,
     ExtractedMetadata,
     MetadataProcessor,
     ProcessingResult,
@@ -234,6 +235,37 @@ def test_processed_metadata_is_saved_exactly(
     assert video.average_fps == pytest.approx(29.97)
     assert (video.duration_seconds, video.frame_count, video.codec) == (10.0, 300, "avc1")
     assert video.metadata_extracted_at is not None
+
+
+@pytest.mark.parametrize(
+    ("found", "saved"),
+    [
+        (None, None),
+        ((), []),
+        (
+            (CameraJump(349.9, 386.9, 107.4),),
+            [{"from_seconds": 349.9, "to_seconds": 386.9, "shift_px": 107.4}],
+        ),
+    ],
+)
+def test_the_camera_check_is_saved_with_not_checked_kept_apart_from_no_move(
+    stored_video: tuple[Video, AnalysisJob],
+    storage: LocalFileStorage,
+    found: tuple[CameraJump, ...] | None,
+    saved: list[dict[str, float]] | None,
+) -> None:
+    _, job = stored_video
+
+    class Checked:
+        name, version = "checked", "1"
+
+        def process(
+            self, video: VideoRef, s: Storage, report: ProgressReporter
+        ) -> ProcessingResult:
+            return ProcessingResult(metadata=METADATA, camera_jumps=found)
+
+    run_analysis_job(str(job.id), processor=Checked(), storage=storage)
+    assert reload_video(job.id).camera_jumps == saved
 
 
 def test_a_failed_decode_leaves_metadata_absent_not_zero(

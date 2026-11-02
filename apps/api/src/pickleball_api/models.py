@@ -328,6 +328,11 @@ class Video(Base):
     metadata_extracted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
     )
+    #: Each is `from_seconds`, `to_seconds` and `shift_px`. Null means not checked,
+    #: and an empty list means checked and no move found.
+    camera_jumps: Mapped[list[dict[str, float]] | None] = mapped_column(
+        JSON(none_as_null=True), default=None
+    )
 
     match: Mapped[Match] = relationship(back_populates="video")
 

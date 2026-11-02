@@ -278,6 +278,7 @@ def test_the_openapi_contract_describes_matches(client: TestClient) -> None:
     assert set(schemas["MatchList"]["properties"]) == {"matches", "count"}
     assert set(schemas["VideoRead"]["properties"]) == {
         "id", "original_filename", "content_type", "byte_size", "created_at", "metadata",
+        "camera_jumps",
     }
     assert set(schemas["VideoMetadataRead"]["properties"]) == {
         "width", "height", "rotation_degrees", "average_fps", "duration_seconds",
