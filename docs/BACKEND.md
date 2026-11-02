@@ -18,8 +18,9 @@ frontend to list and inspect matches.
 
 It does not analyse the match. The worker's `CalibrationPreparationProcessor` reads
 the video's dimensions, rotation, average frame rate, duration, frame count and
-codec, and writes stills of it, with `pickleball_ml.video.reader`, and nothing else:
-nothing in a frame is analysed and no model is loaded. It sits behind the same
+codec, writes stills of it, with `pickleball_ml.video.reader`, and compares those
+frames for a moved camera, and nothing else: nothing about play is analysed and no
+model is loaded. It sits behind the same
 interface (`pickleball_worker.processors.VideoProcessor`) that later stages will use.
 
 There is no authentication and no video playback yet. The web app that drives this
@@ -33,7 +34,7 @@ apps/api/                              # package `pickleball_api`
 ├── Dockerfile                         # shared by the api and worker compose services
 ├── migrations/
 │   ├── env.py                         # reads the URL from settings unless given one
-│   └── versions/                      # 0001 tables, 0002 CHECKs, 0003 matches, 0004 metadata, 0005 stills, 0006 calibrations
+│   └── versions/                      # 0001 tables, 0002 CHECKs, 0003 matches, 0004 metadata, 0005 stills, 0006 calibrations, 0007 camera check
 ├── src/pickleball_api/
 │   ├── calibration.py                 # fits landmarks through pickleball_ml, or refuses them
 │   ├── config.py                      # typed settings, and the extension allowlist
@@ -165,14 +166,22 @@ which work like `can_extract_metadata`. A calibration has:
   "mean_reprojection_error_ft": 0.1, "max_reprojection_error_ft": 0.2,
   "created_at": "…",
   "projected_lines": { "near_baseline": [[76.2, 1020.1], [1794.8, 1024.9]] },
+  "far_baseline_ft_per_pixel": 0.49,
   "warnings": []
 }
 ```
 
 `homography` maps image pixels to court feet, and only means anything for a point
-on the ground. `projected_lines` and `warnings` are worked out when it is read:
-`projected_lines` is each court line's two ends in pixels, for an overlay, and
-`warnings` is fixed sentences for anything to review.
+on the ground. `projected_lines`, `far_baseline_ft_per_pixel` and `warnings` are worked
+out when it is read: `projected_lines` is each court line's two ends in pixels, for an
+overlay, `far_baseline_ft_per_pixel` is the most one image pixel can be worth along the
+far baseline, or null if that line cannot be projected, and `warnings` is fixed sentences
+for anything to review.
+
+`video.camera_jumps` lists where sampled frames show the camera moved, each with
+`from_seconds`, `to_seconds` and `shift_px`. An empty list means checked with no move
+found. Null means not checked: the video was processed before the check existed, or its
+frames could not all be compared. A move and back between two samples would not show.
 
 `MatchSummary` (each item of `GET /api/matches`) is the same without `jobs`, the
 `can_*` flags, `reference_frames` and `calibration`.
@@ -214,6 +223,7 @@ Five tables. `matches` is the parent:
 | `duration_seconds`, `frame_count` | Nullable; `>= 0`. Duration is frame count over average rate |
 | `codec` | FourCC, `VARCHAR(32)`. Nullable even once decoded |
 | `metadata_extracted_at` | Null until decoded. A CHECK requires every decoded field to be present with it, and absent without it |
+| `camera_jumps` | JSON, nullable. Where sampled frames show the camera moved. Empty means none found, and null means not checked |
 
 `analysis_jobs`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `status`, `stage`,
 `progress` (0.0-1.0, with a CHECK), `error_code`, `error_message`, `created_at`,
@@ -548,6 +558,12 @@ that already has metadata shows a **Make calibration images** action. Downgradin
 `calibration_required`, since that status promises a calibration exists. Downgrading
 0005 forgets the images, but their files stay in storage until something removes
 them.
+
+### Migration 0007: the camera check
+
+Adds nullable `videos.camera_jumps` and enqueues nothing, so every existing video stays
+null, meaning not checked, unless it is uploaded again. Reference-frame jobs only run for
+a match with no images, so they will not fill it in. Downgrading forgets the results.
 
 ## Dependencies and Processes
 

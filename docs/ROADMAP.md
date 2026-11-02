@@ -281,28 +281,72 @@ over a 1 ft grid of the court:
 
 The fit follows `cam2`, which is consistent with about 60% of the video coming after
 the move, so the background mostly shows that position. It is therefore about 4 ft out
-for the first six minutes, while its error figures look good. The 1.09 ft is the first
-sign of how far two hand-placed fits can differ. This camera is wide-angle and had the
-worst Phase 0 fit, so it may not carry over to other videos, and which fit is closer to
-the truth is unmeasured.
+for the first six minutes, while its error figures look good.
+
+The gap to `cam2` is the far baseline, not the camera: the two images line up to 0.0 px,
+the fits differ by under 0.5 ft on the near half and by up to 4.08 ft at the far baseline,
+and the far-baseline clicks are 7-9 px apart, all in the same direction. Zoomed in, the
+reason is visible. From this low camera the top of the net sits right beside the far
+baseline and looks like a thick white line. The hand-placed clicks are on the thin
+painted line beyond it, and the Phase 0 `cam2` clicks are on the near side of the net's
+top, so that Phase 0 calibration is off by 3-4 ft at the far baseline. This was judged by
+eye, supported by the hand-placed fit being the tighter one. The `riggs_b` results in
+`docs/PHASE_0B_RESULTS.md` used that calibration, and what it cost them is unmeasured. The
+annotation is unchanged, because the results were recorded against it. `cam1` was not
+looked at in this way.
+
+Status (2026-11-01): calibration fix-up, from those findings.
+
+- A job now compares neighbouring sampled frames for a moved camera
+  (`pickleball_ml.court.camera`), and the calibrate page warns before any landmark is
+  placed. Migration `0007_camera_jumps`. Null means not checked, which is every video
+  processed earlier, and there is no way to check one short of uploading it again. At 25
+  frames per video:
+
+  | Clip | Length | Largest step | Reported |
+  |---|---|---|---|
+  | `riggs` | 15.4 min | 107.4 px | Moved between 5:50 and 6:27 (known: 6:08) |
+  | `gold` | 78.6 min | 6.7 px | Nothing |
+  | `buzz` | 14.7 min | 4.0 px | Nothing |
+  | `pro63` | 21.0 min | 0.9 px | Nothing |
+  | `testclip` | 17.2 min | 0.4 px | Nothing |
+
+  It detects and warns, because moving cameras are out of MVP scope. With one moved clip
+  the 20 px threshold is confirmed against four steady clips, not tuned on many moves, and
+  a move and back between two samples would not show.
+- A saved calibration reports the most one image pixel can be worth at the far baseline,
+  worked out from the homography: 0.49 ft on the `riggs` hand-placed fit. It has no
+  pass/fail threshold, because one video cannot justify one.
+- The page now says to click the middle of the painted lines, warns about the net beside
+  the far baseline, and will not save landmarks that have not changed.
+
+Holding each landmark out of the fit and predicting it from the rest gives the first
+measure of ground-plane error at known points:
+
+| Calibration | Landmarks | Held-out mean | Held-out worst |
+|---|---|---|---|
+| `buzz` | 12 | 0.13 ft | 0.29 ft |
+| `pro63` | 8 | 0.17 ft | 0.35 ft |
+| `riggs`, hand-placed in the app | 12 | 0.32 ft | 0.74 ft |
+| `gold` | 11 | 0.39 ft | 1.05 ft |
+| `riggs` `cam1` | 12 | 0.42 ft | 0.87 ft |
+| `testclip` | 11 | 0.44 ft | 0.92 ft |
+| `riggs` `cam2` | 11 | 0.57 ft | 1.16 ft |
+
+This only tests whether clicks agree with each other, so it missed the `cam2` far-baseline
+error above, where a whole row of clicks was off together. These are one-off figures from
+a script that was not kept.
 
 Carried into later phases:
 
-- A background is unusable when the camera moved mid-video, and one calibration
-  cannot be right on both sides of the move. The page says so, but nothing detects it,
-  and `riggs` above shows a good-looking fit that is wrong for part of the video.
+- One calibration cannot be right on both sides of a camera move. Phase 3 needs to decide
+  what to do with a video that has one before applying a calibration to all of it.
 - Placing 12 landmarks is tedious, and not practical on a phone. Proposed but neither
   decided nor built: tap the four corners, project the other landmarks, snap them to
   the painted lines, and confirm. Fully automatic detection stays in Phase 12.
-- The page does not say which part of a painted line to click. The official dimensions
-  are understood to run to the lines' outer edges, not checked against the rulebook. Edge
-  and center differ by about 1 inch.
-- Saving again with nothing changed adds another row: the `riggs` session left three
-  identical rows within 5 seconds. The newest wins, so results are unaffected, and why
-  it was pressed repeatedly is unknown.
 - Reference frames and calibrations have no deletion path, like the rest of a match.
 - The reprojection error measures how well clicks agree, not position accuracy, and
-  the page says that too. Position accuracy in court feet is still unmeasured.
+  the page says that too. Position accuracy for a player in court feet is still unmeasured.
 - Sample positions are approximate because they come from seeking.
 
 Build:

@@ -69,8 +69,9 @@ Phase 2 (court calibration) is complete:
 - Checkpoint 5: a **calibration page** to place landmarks and check the result
   against the painted lines and a top-down court.
 
-Processing does nothing more than that yet: nothing in a frame is analysed and no
-model is loaded, and the web app says so on the page. Player tracking in the worker
+The job also compares its sampled frames for a moved camera, and the calibration page
+warns when it finds one. Processing does nothing more than that yet: nothing about play
+is analysed and no model is loaded, and the web app says so on the page. Player tracking in the worker
 (Phase 3) comes next. See `docs/ROADMAP.md`.
 
 ## Development Setup
@@ -170,7 +171,8 @@ or the **Extract metadata** button on the match page. The old `/api/videos`
 endpoints are gone; the web app redirects `/videos` links to `/matches`. Migrations
 0005 and 0006 add calibration images and calibrations. A match that already has
 metadata has no images and nothing is queued for it: use the **Make calibration
-images** button on its page.
+images** button on its page. Migration 0007 adds the camera check. A video processed
+before it stays not checked unless it is uploaded again.
 
 The worker and the API import OpenCV (through `pickleball_ml.video` and
 `pickleball_ml.court.geometry`) but not torch: both depend on `pickleball-ml`
