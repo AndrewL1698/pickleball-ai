@@ -29,49 +29,57 @@ Video
 
 ## Current Status
 
-Phase 0a (CV prototype) is implemented as a command-line pipeline for one test video:
+Phases 0-2 of 12 are done. Phase 3 (player tracking in the app) is next. Updated
+2026-11-04; the detail is in `docs/ROADMAP.md`.
 
-```text
-video -> manual court calibration -> player tracks -> homography -> animated top-down court
-```
+| Phase | Status |
+|---|---|
+| 0a. CV prototype on one video | Done |
+| 0b. Feasibility across four matches | Done, exit criterion passed |
+| 1. Full-stack skeleton: upload, database, background jobs | Done |
+| 2. Court calibration in the web app | Done |
+| 3. Player tracking in the app | Next |
+| 4. Ball tracking | Baseline only, from Phase 0b |
+| 5-12. Rallies, analytics, corrections, hits, shots, tactics, coaching, automatic court detection | Not started |
 
-Phase 0b extends that to several recordings at once: an experiment manifest of
-sampled windows, camera comparison across four fixed-camera matches, measured
-player-tracking metrics, and a first ball-tracking baseline. Results and the
-exit-criterion assessment are in `docs/PHASE_0B_RESULTS.md`.
+### Player and ball tracking today
 
-Phase 1 (full-stack skeleton) is complete. All three of its checkpoints are
-done, and it passed its exit criterion: a video can be uploaded and watched
-through a background processing job, in the browser.
+Tracking runs in the Phase 0 command-line pipeline only. The web app doesn't track
+yet; that is Phase 3. Both images are the same moment of a held-out test window
+(`buzz_b`, 9:41), rendered by `pbml render` and the ball debug render.
 
-- A FastAPI service that accepts a video upload, records it in PostgreSQL,
-  stores the file behind a storage interface, and queues an analysis job that a
-  Redis/RQ worker picks up and drives to completion (`docs/BACKEND.md`).
-- A Next.js app for uploading a video, listing what has been uploaded, and
-  following a job through its states (`docs/FRONTEND.md`).
-- Integration and hardening: the whole stack starts from a clean checkout,
-  natively or with `docker compose --profile app`, with migrations applied by
-  the stack rather than by hand.
+![Four tracked players with their identities, and their positions on a top-down court](docs/images/player-tracking.jpg)
 
-Phase 2 (court calibration) is complete:
+Players: boxes, identities and court slots on the frame, and the same four players
+projected onto a top-down court. On the four test windows that influenced no
+decision, 86% of visible players were detected, every one with the right identity,
+and there were no ID switches.
 
-- Checkpoint 1: a `Match` owns each uploaded video and every processing job,
-  and the API and web app are organised around matches (`/api/matches`,
-  `/matches`).
-- Checkpoint 2: the worker decodes each video's **metadata** -- resolution in
-  display orientation, rotation, average frame rate, estimated duration, frame
-  count, codec -- and the match page shows it. A match whose metadata is
-  extracted is `calibration_required`, never "ready".
-- Checkpoint 3: every job also makes **calibration images**, a median of frames
-  with the players removed and three single frames, served by the API.
-- Checkpoint 4: `POST /api/matches/{id}/calibrations` fits a homography to landmarks
-  placed on an image and saves it, refusing what cannot make a court.
-- Checkpoint 5: a **calibration page** to place landmarks and check the result
-  against the painted lines and a top-down court.
+![The ball's detected position and recent trail on the same frame](docs/images/ball-tracking.jpg)
 
-Processing does nothing more than that yet: nothing in a frame is analysed and no
-model is loaded, and the web app says so on the page. Player tracking in the worker
-(Phase 3) comes next. See `docs/ROADMAP.md`.
+Ball: the detected position with its score, and the recent trail. This is a tennis
+model used as is, so it's only partly usable. On the one labeled window (`buzz_a`,
+used for tuning, so not a held-out figure) it found half the visible balls (50%
+recall at 20 px), was accurate when it did (6 px median error), and also reported
+false detections. The long jumps up to the far fence in this trail are most likely
+false detections too. Fine-tuning on pickleball footage is Phase 4. Full numbers are
+in `docs/PHASE_0B_RESULTS.md`.
+
+### What the app does
+
+- **Upload and processing (Phase 1):** a Next.js app uploads a video to a FastAPI
+  service, which records it in PostgreSQL and queues a job for a Redis/RQ worker.
+  The page follows the job through its states (`docs/BACKEND.md`,
+  `docs/FRONTEND.md`).
+- **Matches and metadata (Phase 2):** each video belongs to a match. The worker
+  decodes its resolution, rotation, frame rate, duration, frame count and codec.
+- **Court calibration (Phase 2):** the worker makes calibration images, including
+  a median with the players removed. A calibration page lets you place court
+  landmarks on one, fits a homography and checks the result against the painted
+  lines and a top-down court.
+
+Processing does nothing more than that yet: no model is loaded and nothing in a
+frame is analysed, and the web app says so on the page.
 
 ## Development Setup
 
