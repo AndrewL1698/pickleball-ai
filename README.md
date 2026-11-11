@@ -44,7 +44,7 @@ Phases 0-2 of 12 are done. Phase 3 (player tracking in the app) is next. Updated
 
 ### Player and ball tracking today
 
-https://github.com/user-attachments/assets/8d8b6e28-7df3-4599-ac9a-2ec64fc505f1
+https://github.com/user-attachments/assets/75187f3b-8043-4e12-9fd6-83e7d4381deb
 
 Tracking runs in the Phase 0 command-line pipeline only. The web app doesn't track
 yet; that is Phase 3. Both images are the same moment of a held-out test window
