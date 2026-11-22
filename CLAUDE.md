@@ -551,3 +551,19 @@ Shape of the prototype:
 - Geometry and filtering logic have pytest unit tests.
 
 Do not begin strategic coaching until this works reliably.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues on AndrewL1698/pickleball-ai via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+`docs/ROADMAP.md` stays the source of truth for project direction and phase order. Issues, including a `/wayfinder` map, track work inside the phase the roadmap marks in progress. Where an issue disagrees with the roadmap, follow the roadmap until the roadmap itself is changed.
+
+### Triage labels
+
+Default five-role vocabulary (needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one root `GLOSSARY.md` plus `docs/adr/`, both created when first needed. See `docs/agents/domain.md`.
