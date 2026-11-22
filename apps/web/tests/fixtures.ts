@@ -62,6 +62,7 @@ export const VIDEO: Video = {
   byte_size: 2418,
   created_at: "2026-09-23T18:00:52.792390Z",
   metadata: null,
+  camera_jumps: null,
 };
 
 /** A portrait phone clip: stored sideways, tagged 90 degrees, plays 1080x1920. */
@@ -155,13 +156,14 @@ export const COURT_CALIBRATION: CourtCalibration = {
     near_baseline: [[400, 1000], [1520, 1000]],
     net: [[700, 500], [1220, 500]],
   },
+  far_baseline_ft_per_pixel: 0.47,
   warnings: [],
 };
 
 export const CALIBRATABLE_MATCH: MatchDetail = {
   ...MATCH_DETAIL,
   status: "calibration_required",
-  video: { ...VIDEO, metadata: VIDEO_METADATA },
+  video: { ...VIDEO, metadata: VIDEO_METADATA, camera_jumps: [] },
   latest_job: JOB_READY,
   jobs: [JOB_READY],
   can_calibrate: true,

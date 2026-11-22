@@ -102,6 +102,13 @@ What the table supports:
   manifest models this as two camera segments and refuses any window that crosses the
   move.
 
+Correction (2026-11-01): the `riggs` cam2 far-baseline landmarks are on the near side of
+the net's top, which from this camera sits right beside the baseline, not on the painted
+line beyond it. That puts this calibration 3-4 ft off at the far baseline, so "the
+residual is landmark noise" above does not fully hold for it, and the error figure does
+not show the problem. The results here are kept as recorded; what this cost `riggs_b` is
+unmeasured. See Phase 2 in `docs/ROADMAP.md`.
+
 ### Recommended recording setup
 
 Supported by the table above:

@@ -1,4 +1,4 @@
-"""Migrations 0005 and 0006: calibration images and court calibrations.
+"""Migrations 0005 to 0007: calibration images, court calibrations, the camera check.
 
 SQLite with foreign keys on, as in `test_migration_0003.py`; `test_migrations.py`
 checks PostgreSQL against the models.
@@ -105,6 +105,29 @@ def test_a_match_keeps_its_rows_through_the_upgrade_and_gains_nothing(
     )
     assert connection.execute(text("SELECT count(*) FROM reference_frames")).scalar_one() == 0
     assert connection.execute(text("SELECT count(*) FROM court_calibrations")).scalar_one() == 0
+
+
+def test_a_video_from_before_the_camera_check_is_not_checked_rather_than_steady(
+    connection: Connection,
+) -> None:
+    migrate(connection, "upgrade", "0006_court_calibrations")
+    insert_match(connection)
+    connection.execute(
+        text(
+            "INSERT INTO videos (id, match_id, original_filename, storage_key, content_type,"
+            " byte_size) VALUES ('00000000000000000000000000000004', :match, 'm.mp4', 'k.mp4',"
+            " 'video/mp4', 10)"
+        ),
+        {"match": MATCH},
+    )
+    connection.commit()
+
+    migrate(connection, "upgrade", "head")
+    assert connection.execute(text("SELECT camera_jumps FROM videos")).scalar_one() is None
+
+    migrate(connection, "downgrade", "0006_court_calibrations")
+    assert "camera_jumps" not in {c["name"] for c in inspect(connection).get_columns("videos")}
+    assert connection.execute(text("SELECT count(*) FROM videos")).scalar_one() == 1
 
 
 def test_a_downgrade_removes_the_tables_and_the_promise_of_a_calibration(

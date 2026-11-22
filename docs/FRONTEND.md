@@ -168,13 +168,22 @@ needing an answer. A placed landmark can be dragged, or reselected from the list
 the selected landmark by one image pixel, or ten with Shift, from the image or the
 list, and Enter on the image drops it in the middle, so the whole job can be done
 from the keyboard. A click only resolves to a screen pixel, about two image pixels
-on a laptop, and at the far baseline an image pixel can be a quarter of a foot, so
-the page recommends the arrow keys there. A magnifier follows the pointer or the
-selected landmark, and a small top-down court shows where the selected landmark is.
-Choosing another image keeps the landmarks, which are in the same pixels.
+on a laptop, and at the far baseline an image pixel can be half a foot, so the page
+recommends the arrow keys there. The instructions say to click the middle of the
+painted lines, and warn that from a low camera the top of the net can look like the far
+baseline. A magnifier follows the pointer or the selected landmark, and a small top-down
+court shows where the selected landmark is. Choosing another image keeps the landmarks,
+which are in the same pixels. Saving does nothing while the landmarks and image are the
+ones already saved, and the page says so.
+
+**A moved camera.** When `video.camera_jumps` lists a move, a warning above the landmarks
+says when it happened and that the errors cannot show the damage. Advice about a moved
+camera stays under the image picker unless the check found no move, so a video that was
+never checked (`null`) is not implied to be steady.
 
 **Checking.** Saving shows the errors, labelled as how well the landmarks agree
-rather than how accurate a position will be, the API's warnings, and the API's
+rather than how accurate a position will be, what one pixel is worth at the far
+baseline, the API's warnings, and the API's
 projected lines over any of the images, including a single frame with players in it.
 A click on one puts the point on the top-down court, and in words. A point above the
 horizon is said not to be on the court plane, because the sum would otherwise produce
@@ -383,8 +392,3 @@ one of them once on a clean checkout.
 - **The magnifier does not help on a touch screen**, where nothing hovers, though it
   does follow the selected landmark. The page lays out at phone width, but placing
   landmarks there is not practical.
-- **No rule for which part of a painted line to click**, so people may mix edges and
-  centers. They differ by about 1 inch.
-- **Saving can repeat.** The button only guards against a save already in flight, so
-  pressing it again with nothing changed adds an identical calibration. The newest
-  wins, so results are unaffected.

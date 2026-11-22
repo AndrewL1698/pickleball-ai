@@ -187,6 +187,36 @@ def test_a_job_for_calibration_images_needs_a_match_that_exists(client: TestClie
 # --- Calibrations -----------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "jumps",
+    [
+        None,
+        [],
+        [{"from_seconds": 349.9, "to_seconds": 386.9, "shift_px": 107.4}],
+    ],
+)
+def test_match_detail_keeps_not_checked_apart_from_no_camera_move(
+    client: TestClient,
+    session: Session,
+    storage: LocalFileStorage,
+    jumps: list[dict[str, float]] | None,
+) -> None:
+    match = make_match(session, storage)
+    assert match.video is not None
+    match.video.camera_jumps = jumps
+    session.commit()
+    body = client.get(f"/api/matches/{match.id}").json()
+    assert body["video"]["camera_jumps"] == jumps
+
+
+def test_a_saved_calibration_says_what_a_pixel_is_worth_at_the_far_baseline(
+    client: TestClient, session: Session, storage: LocalFileStorage
+) -> None:
+    match = make_match(session, storage)
+    calibration = post_calibration(client, match, clicks()).json()["calibration"]
+    assert calibration["far_baseline_ft_per_pixel"] > 0
+
+
 def test_saving_a_calibration_recovers_the_camera_and_readies_the_court(
     client: TestClient, session: Session, storage: LocalFileStorage
 ) -> None:

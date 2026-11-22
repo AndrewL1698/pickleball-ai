@@ -10,7 +10,8 @@ recording setups, not survey-grade measurements.
 
 Stability: sampled frames are matched to a reference frame with ORB features and
 a RANSAC homography; the reported drift is how far points in the lower-middle
-of the image move. Jumps between consecutive samples locate camera bumps.
+of the image move. Jumps between consecutive samples locate camera bumps, and drift
+since the camera last came to rest locates a camera that creeps.
 
 Sharpness: variance of the Laplacian inside the projected court area, a common
 blur/detail proxy. Only comparable between videos of the same resolution.
@@ -31,6 +32,11 @@ from pickleball_ml.video.reader import Frame, sample_frames
 
 MIN_PLAUSIBLE_HFOV_DEG = 20.0
 MAX_PLAUSIBLE_HFOV_DEG = 130.0
+
+#: A shift past this is a moved camera, not wobble: either one step between samples or
+#: the drift since the camera last came to rest. At 25 samples per video the five test
+#: clips step at most 6.7 px, and `riggs` jumps 107 px when moved.
+CAMERA_JUMP_PX = 20.0
 
 
 def focal_from_homography(image_to_court: FloatArray, width: int, height: int) -> float | None:
@@ -179,11 +185,7 @@ def camera_drift(
     previous: tuple[Any, Any, float] | None = None
     samples = []
     for index, (time_s, image) in enumerate(frames):
-        scale = 960.0 / image.shape[1]
-        small = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-        keypoints, descriptors = orb.detectAndCompute(gray, None)
-        current = (keypoints, descriptors, scale)
+        small, current = _features(orb, image)
         if reference is None:
             reference = current
             samples.append(DriftSample(time_s, 0.0, None))
@@ -198,6 +200,81 @@ def camera_drift(
     return samples
 
 
+@dataclass(frozen=True)
+class CameraMove:
+    """The camera was in one place at `from_s` and in another by `to_s`."""
+
+    from_s: float
+    to_s: float
+    shift_px: float
+
+
+@dataclass(frozen=True)
+class CameraMoveCheck:
+    moves: tuple[CameraMove, ...]
+    #: Every comparison the check needed could be made. When False, an empty `moves`
+    #: does not rule out a move; a move that was found still stands.
+    complete: bool
+
+
+def find_camera_moves(
+    frames: Iterable[tuple[float, Frame]], threshold_px: float = CAMERA_JUMP_PX
+) -> CameraMoveCheck:
+    """Where the camera moved, from frames in time order.
+
+    Each frame is matched only with the one before it. That step finds a bump, and the
+    steps chained together since the camera last came to rest find a camera that creeps
+    a few pixels at a time without any single step crossing the threshold. Chaining is
+    used rather than matching against the resting frame directly, because frames far
+    apart in time match badly outdoors as the light changes: on `gold` that comparison
+    swings between 7 and 21 px while no step is over 7 px. A bump is reported between
+    the two neighbouring frames, creep from the frame the camera was resting at. After a
+    move, the frame it was found on is the new resting position.
+    """
+    orb = cv2.ORB.create(3000)
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    moves: list[CameraMove] = []
+    complete = True
+    count = 0
+    previous: tuple[float, tuple[Any, Any, float]] | None = None
+    rest_s = 0.0
+    since_rest = np.eye(3)  # previous frame's pixels from the resting frame's
+    for time_s, image in frames:
+        count += 1
+        small, current = _features(orb, image)
+        if previous is None:
+            previous, rest_s = (time_s, current), time_s
+            continue
+        probe = _probe_points(small.shape[1], small.shape[0])
+        step_h = _homography(matcher, previous[1], current)
+        if step_h is None:
+            # The chain is broken: start again from here, and nothing before this frame
+            # can be ruled out.
+            complete = False
+            previous, rest_s, since_rest = (time_s, current), time_s, np.eye(3)
+            continue
+        since_rest = step_h @ since_rest
+        step = _shift(step_h, probe, current[2])
+        drift = _shift(since_rest, probe, current[2])
+        if step > threshold_px:
+            moves.append(CameraMove(previous[0], time_s, step))
+        elif drift > threshold_px:
+            moves.append(CameraMove(rest_s, time_s, drift))
+        if step > threshold_px or drift > threshold_px:
+            rest_s, since_rest = time_s, np.eye(3)
+        previous = (time_s, current)
+    return CameraMoveCheck(tuple(moves), complete and count >= 2)
+
+
+def _features(orb: cv2.ORB, image: Frame) -> tuple[Any, tuple[Any, Any, float]]:
+    """ORB features on a copy 960 px wide, with the scale back to the source."""
+    scale = 960.0 / image.shape[1]
+    small = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    keypoints, descriptors = orb.detectAndCompute(gray, None)
+    return small, (keypoints, descriptors, scale)
+
+
 def _probe_points(width: int, height: int) -> FloatArray:
     """Points around the court area (lower middle of a behind-baseline view)."""
     return np.array([[0.25 * width, 0.75 * height], [0.75 * width, 0.75 * height],
@@ -208,6 +285,14 @@ def _displacement(
     matcher: cv2.BFMatcher, a: tuple[Any, Any, float], b: tuple[Any, Any, float],
     probe: FloatArray,
 ) -> float | None:
+    homography = _homography(matcher, a, b)
+    return None if homography is None else _shift(homography, probe, a[2])
+
+
+def _homography(
+    matcher: cv2.BFMatcher, a: tuple[Any, Any, float], b: tuple[Any, Any, float]
+) -> FloatArray | None:
+    """Maps frame a's (scaled) pixels to frame b's, or None if they cannot be matched."""
     if a[1] is None or b[1] is None:
         return None
     matches = matcher.match(a[1], b[1])
@@ -216,13 +301,16 @@ def _displacement(
     src = np.array([a[0][m.queryIdx].pt for m in matches], dtype=np.float64)
     dst = np.array([b[0][m.trainIdx].pt for m in matches], dtype=np.float64)
     homography, _ = cv2.findHomography(src, dst, cv2.RANSAC, 3.0)
-    if homography is None:
-        return None
+    return None if homography is None else np.asarray(homography, dtype=np.float64)
+
+
+def _shift(homography: FloatArray, probe: FloatArray, scale: float) -> float:
+    """How far the probe points move, in the source video's pixels."""
     moved = apply_homography(homography, probe)
-    return float(np.max(np.linalg.norm(moved - probe, axis=1)) / a[2])
+    return float(np.max(np.linalg.norm(moved - probe, axis=1)) / scale)
 
 
-def summarize_drift(samples: list[DriftSample], jump_px: float = 20.0) -> dict[str, Any]:
+def summarize_drift(samples: list[DriftSample], jump_px: float = CAMERA_JUMP_PX) -> dict[str, Any]:
     drift = np.array([s.drift_px for s in samples if s.drift_px is not None], dtype=float)
     jumps = [{"time_s": round(s.time_s, 1), "step_px": round(s.step_px, 1)} for s in samples
              if s.step_px is not None and s.step_px > jump_px]

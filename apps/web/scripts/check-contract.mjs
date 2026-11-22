@@ -65,6 +65,7 @@ for (const [apiName, typeName] of [
   ["JobRead", "Job"],
   ["VideoRead", "Video"],
   ["VideoMetadataRead", "VideoMetadata"],
+  ["CameraJumpRead", "CameraJump"],
   ["ReferenceFrameRead", "ReferenceFrame"],
   ["CalibrationRead", "CourtCalibration"],
   ["CalibrationCreate", "CalibrationRequest"],

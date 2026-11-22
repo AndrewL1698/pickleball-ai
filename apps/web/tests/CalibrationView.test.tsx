@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CalibrationView } from "@/components/CalibrationView";
 import { TopDownCourt } from "@/components/TopDownCourt";
 import { LANDMARK_NAMES } from "@/lib/types";
-import type { MatchDetail } from "@/lib/types";
+import type { CameraJump, MatchDetail, Video } from "@/lib/types";
 import {
   CALIBRATABLE_MATCH,
   CALIBRATED_MATCH,
@@ -18,6 +18,7 @@ import {
   JOB_RUNNING,
   MATCH_DETAIL,
   REFERENCE_FRAME,
+  SAMPLE_FRAME,
   jsonResponse,
 } from "./fixtures";
 
@@ -61,6 +62,12 @@ function clickPixel(stage: Element, x: number, y: number) {
 
 function placeFirstLandmarks(stage: Element, count: number) {
   for (let i = 0; i < count; i += 1) clickPixel(stage, 100 + i * 200, 100 + (i % 3) * 300);
+}
+
+/** Nudge a landmark already placed, so the page has something new to save. */
+async function moveALandmark() {
+  await userEvent.click(await screen.findByRole("button", { name: /^\d+\. near kitchen line, left end/i }));
+  await userEvent.keyboard("{ArrowRight}");
 }
 
 describe("reaching the page", () => {
@@ -364,9 +371,116 @@ describe("checking a saved calibration", () => {
     };
     serve(CALIBRATED_MATCH, () => jsonResponse(newer, 201));
     render(<CalibrationView matchId={MATCH_ID} />);
-    await userEvent.click(await screen.findByRole("button", { name: /save a new calibration/i }));
+    await moveALandmark();
+    await userEvent.click(screen.getByRole("button", { name: /save a new calibration/i }));
     expect(await screen.findByText("0.11 ft")).toBeInTheDocument();
     expect(screen.queryByText("0.23 ft")).toBeNull();
+  });
+
+  it("reports what one pixel is worth at the far baseline", async () => {
+    const { section } = await openCheck();
+    expect(within(section).getByText("One pixel at the far baseline")).toBeInTheDocument();
+    expect(within(section).getByText("Up to 0.47 ft")).toBeInTheDocument();
+  });
+
+  it("leaves the far-baseline figure off when the API has none", async () => {
+    const { section } = await openCheck({
+      ...CALIBRATED_MATCH,
+      calibration: { ...COURT_CALIBRATION, far_baseline_ft_per_pixel: null },
+    });
+    expect(within(section).queryByText("One pixel at the far baseline")).toBeNull();
+  });
+});
+
+describe("saving again", () => {
+  it("does nothing while the landmarks are the ones already saved, and says why", async () => {
+    const fetchMock = serve(CALIBRATED_MATCH);
+    render(<CalibrationView matchId={MATCH_ID} />);
+    const save = await screen.findByRole("button", { name: /save a new calibration/i });
+    expect(save).toHaveAttribute("aria-disabled", "true");
+    expect(save).toHaveAccessibleDescription(/nothing has changed/i);
+    await userEvent.click(save);
+    expect(postBodies(fetchMock)).toHaveLength(0);
+  });
+
+  it("can save again once a landmark has moved", async () => {
+    const fetchMock = serve(CALIBRATED_MATCH);
+    render(<CalibrationView matchId={MATCH_ID} />);
+    await moveALandmark();
+    const save = screen.getByRole("button", { name: /save a new calibration/i });
+    expect(save).toHaveAttribute("aria-disabled", "false");
+    await userEvent.click(save);
+    expect(postBodies(fetchMock)).toHaveLength(1);
+  });
+
+  it("can save the same landmarks on a different image", async () => {
+    const fetchMock = serve(CALIBRATED_MATCH);
+    render(<CalibrationView matchId={MATCH_ID} />);
+    await userEvent.click(
+      within(await screen.findByRole("group", { name: /image to place them on/i })).getByRole("radio", {
+        name: /into the video/i,
+      }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /save a new calibration/i }));
+    expect(postBodies(fetchMock)[0].body.reference_frame_id).toBe(SAMPLE_FRAME.id);
+  });
+
+  it("stops offering the save once a save comes back with those landmarks", async () => {
+    // Answers with whatever was sent, as the real API does.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) =>
+        init?.method === "POST"
+          ? jsonResponse(
+              {
+                ...CALIBRATED_MATCH,
+                calibration: {
+                  ...COURT_CALIBRATION,
+                  image_points: JSON.parse(init.body as string).image_points,
+                },
+              },
+              201,
+            )
+          : jsonResponse(CALIBRATABLE_MATCH),
+      ),
+    );
+    const stage = await openEditor();
+    placeFirstLandmarks(stage, 5);
+    await userEvent.click(screen.getByRole("button", { name: /save calibration/i }));
+    const again = await screen.findByRole("button", { name: /save a new calibration/i });
+    expect(again).toHaveAttribute("aria-disabled", "true");
+  });
+});
+
+describe("a moved camera", () => {
+  function withJumps(jumps: CameraJump[] | null): MatchDetail {
+    return {
+      ...CALIBRATABLE_MATCH,
+      video: { ...(CALIBRATABLE_MATCH.video as Video), camera_jumps: jumps },
+    };
+  }
+
+  it("warns before any landmark is placed, and says when", async () => {
+    serve(withJumps([{ from_seconds: 349.9, to_seconds: 386.9, shift_px: 107.4 }]));
+    await openEditor();
+    const notice = screen.getByRole("status");
+    expect(notice).toHaveTextContent(/the camera moved during this video/i);
+    expect(notice).toHaveTextContent(/between 5:50 and 6:27/i);
+    expect(notice).toHaveTextContent(/even if the errors below look good/i);
+  });
+
+  it("says nothing when the check found no move, and drops the advice about one", async () => {
+    serve(withJumps([]));
+    await openEditor();
+    expect(screen.queryByText(/the camera moved during this video/i)).toBeNull();
+    expect(screen.queryByText(/if the camera moved/i)).toBeNull();
+  });
+
+  it("keeps the advice when the video was not checked, without claiming a move", async () => {
+    serve(withJumps(null));
+    await openEditor();
+    expect(screen.queryByText(/the camera moved during this video/i)).toBeNull();
+    expect(screen.getByText(/if the camera moved/i)).toBeInTheDocument();
   });
 });
 

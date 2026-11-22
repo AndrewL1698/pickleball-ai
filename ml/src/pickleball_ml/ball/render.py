@@ -1,7 +1,7 @@
 """Debug video for ball tracking: chosen position, confidence, and a short trail."""
 
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import cast
 
@@ -35,7 +35,10 @@ def render_ball_video(
         cast(int, f): g[["x", "y", "candidate"]].to_numpy(dtype=float)
         for f, g in candidates.groupby("frame_number")
     }
-    trail: deque[tuple[int, int]] = deque(maxlen=max(1, round(trail_seconds * fps / stride)))
+    # One entry per rendered frame, None where there is no ball, so the trail spans a fixed
+    # time and is never drawn across frames where the tracker reported nothing.
+    trail: deque[tuple[int, int] | None] = deque(
+        maxlen=max(1, round(trail_seconds * fps / stride)))
     writer: cv2.VideoWriter | None = None
     try:
         for frame_number, timestamp_ms, image in iter_frames(video, start_frame, end_frame,
@@ -55,7 +58,6 @@ def render_ball_video(
             if chosen_xy is not None and row is not None:
                 interpolated = bool(row[5])
                 color = INTERPOLATED if interpolated else CHOSEN
-                trail.append(chosen_xy)
                 cv2.circle(out, chosen_xy, 14, color, 2)
                 score = float(row[3])
                 text = "interpolated" if interpolated else f"{score:.2f}"
@@ -64,9 +66,10 @@ def render_ball_video(
             elif row is not None:
                 cv2.putText(out, "no ball", (out.shape[1] - 180, 40), cv2.FONT_HERSHEY_SIMPLEX,
                             0.8, REJECTED, 2, cv2.LINE_AA)
-            if len(trail) >= 2:
-                cv2.polylines(out, [np.array(trail, dtype=np.int32)], False, CHOSEN, 2,
-                              cv2.LINE_AA)
+            trail.append(chosen_xy)
+            runs = trail_runs(trail)
+            if runs:
+                cv2.polylines(out, runs, False, CHOSEN, 2, cv2.LINE_AA)
             _label(out, f"frame {frame_number}  t={timestamp_ms / 1000:.2f}s")
             if writer is None:
                 writer = _open_writer(output, fps / stride, out.shape[1], out.shape[0])
@@ -76,6 +79,20 @@ def render_ball_video(
     finally:
         if writer is not None:
             writer.release()
+
+
+def trail_runs(trail: Iterable[tuple[int, int] | None]) -> list[np.ndarray]:
+    """Polylines of consecutive positions, split wherever a frame had no ball."""
+    runs: list[np.ndarray] = []
+    run: list[tuple[int, int]] = []
+    for point in [*trail, None]:
+        if point is not None:
+            run.append(point)
+            continue
+        if len(run) >= 2:
+            runs.append(np.array(run, dtype=np.int32))
+        run = []
+    return runs
 
 
 def _label(image: Frame, text: str) -> None:

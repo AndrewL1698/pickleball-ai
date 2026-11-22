@@ -8,6 +8,7 @@ import { formatMediaDuration } from "@/lib/format";
 import { type Point, projectToCourt } from "@/lib/homography";
 import {
   LANDMARK_NAMES,
+  type CameraJump,
   type CourtCalibration,
   type LandmarkName,
   type MatchDetail,
@@ -81,6 +82,7 @@ export function CalibrationView({ matchId }: { matchId: string }) {
         </Notice>
       ) : (
         <>
+          <CameraMovedNotice jumps={match.video?.camera_jumps ?? null} />
           <CalibrationEditor match={match} onSaved={setSaved} />
           {match.calibration ? (
             <CalibrationCheck
@@ -102,6 +104,38 @@ function notReadyReason(match: MatchDetail): string {
   }
   if (job?.status === "failed") return "Its latest processing job failed.";
   return "It has no calibration images.";
+}
+
+/** A good fit cannot reveal this, so it comes before any landmark is placed. */
+function CameraMovedNotice({ jumps }: { jumps: CameraJump[] | null }) {
+  if (jumps === null || jumps.length === 0) return null;
+  return (
+    <Notice tone="error" role="status" title="The camera moved during this video.">
+      <ul className="space-y-1">
+        {jumps.map((jump) => (
+          <li key={jump.from_seconds}>
+            It moved between {formatMediaDuration(jump.from_seconds)} and{" "}
+            {formatMediaDuration(jump.to_seconds)}.
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2">
+        One calibration can only be right for one camera position. Positions from the other part
+        of the video will be wrong, even if the errors below look good. The background mostly shows
+        whichever position lasted longest.
+      </p>
+    </Notice>
+  );
+}
+
+/** Whether these are the landmarks already saved, with nothing moved, added or removed. */
+function samePoints(
+  points: Partial<Record<LandmarkName, Point>>,
+  saved: CourtCalibration["image_points"],
+): boolean {
+  return LANDMARK_NAMES.every(
+    (name) => points[name]?.[0] === saved[name]?.[0] && points[name]?.[1] === saved[name]?.[1],
+  );
 }
 
 function frameLabel(frame: ReferenceFrame): string {
@@ -170,11 +204,16 @@ function CalibrationEditor({
   const dragging = useRef<LandmarkName | null>(null);
 
   const problemId = useId();
+  const saveNoteId = useId();
   const inFlight = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   const placedCount = LANDMARK_NAMES.filter((name) => points[name]).length;
+  const unchanged =
+    previous !== null &&
+    frame.id === previous.reference_frame_id &&
+    samePoints(points, previous.image_points);
 
   /** The next landmark still needing an answer, after this one. */
   function nextAfter(
@@ -240,7 +279,7 @@ function CalibrationEditor({
   }
 
   async function save() {
-    if (inFlight.current) return;
+    if (inFlight.current || unchanged) return;
     if (placedCount < MINIMUM_LANDMARKS) {
       setProblem(`Place at least ${MINIMUM_LANDMARKS} landmarks. ${placedCount} placed so far.`);
       return;
@@ -277,12 +316,14 @@ function CalibrationEditor({
           Place the landmarks
         </h2>
         <p className="mt-1 text-sm text-muted">
-          Select a landmark, then click where those painted lines cross. Near means nearer the
-          camera. Left and right are as seen from the near baseline, facing the net. Place as many
-          as you can see, across both halves of the court, and mark the rest as not visible. Never
-          use the net or its posts: they are above the ground. The far baseline is small in the
-          image, so a pixel there is several inches on the court: use the arrow keys to move a
-          selected landmark one pixel at a time, with the magnifier to judge it.
+          Select a landmark, then click the middle of the painted lines where they cross, the same
+          way every time. Near means nearer the camera. Left and right are as seen from the near
+          baseline, facing the net. Place as many as you can see, across both halves of the court,
+          and mark the rest as not visible. Never use the net or its posts: they are above the
+          ground. From a low camera the top of the net can sit right beside the far baseline, so
+          look for the thinner painted line beyond it. The far baseline is small in the image, and a
+          pixel there can be half a foot on the court: use the arrow keys to move a selected
+          landmark one pixel at a time, with the magnifier to judge it.
         </p>
       </div>
 
@@ -295,10 +336,12 @@ function CalibrationEditor({
             selected={frame}
             onSelect={setFrameId}
           />
-          <p className="mt-1 text-sm text-muted">
-            If the lines in the background look doubled or smeared, the camera moved during the
-            video. Use a single frame instead, and expect positions to be wrong after the move.
-          </p>
+          {match.video?.camera_jumps?.length === 0 ? null : (
+            <p className="mt-1 text-sm text-muted">
+              If the camera moved, the background can mix both positions. Use a single frame from the
+              part of the video you want, and expect positions from the other part to be wrong.
+            </p>
+          )}
         </div>
       ) : null}
 
@@ -419,17 +462,21 @@ function CalibrationEditor({
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          aria-disabled={isSaving}
-          aria-describedby={problem ? problemId : undefined}
+          aria-disabled={isSaving || unchanged}
+          aria-describedby={problem ? problemId : saveNoteId}
           onClick={() => void save()}
           className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-lg bg-accent px-4 font-medium text-background aria-disabled:cursor-default aria-disabled:opacity-60"
         >
           {isSaving ? <Spinner /> : null}
           {isSaving ? "Saving…" : previous ? "Save a new calibration" : "Save calibration"}
         </button>
-        <p className="text-sm text-muted">
+        <p id={saveNoteId} className="text-sm text-muted">
           {placedCount} of {LANDMARK_NAMES.length} placed.
-          {previous ? " The earlier calibration is kept, and this one replaces it in use." : ""}
+          {unchanged
+            ? " Nothing has changed since this calibration was saved."
+            : previous
+              ? " The earlier calibration is kept, and this one replaces it in use."
+              : ""}
         </p>
       </div>
       {problem ? (
@@ -538,10 +585,19 @@ function CalibrationCheck({
           <dt className="text-muted">Largest error</dt>
           <dd className="font-medium">{calibration.max_reprojection_error_ft.toFixed(2)} ft</dd>
         </div>
+        {calibration.far_baseline_ft_per_pixel === null ? null : (
+          <div>
+            <dt className="text-muted">One pixel at the far baseline</dt>
+            <dd className="font-medium">
+              Up to {calibration.far_baseline_ft_per_pixel.toFixed(2)} ft
+            </dd>
+          </div>
+        )}
       </dl>
       <p className="text-sm text-muted">
         The error is how well your landmarks agree with each other. It is not a measurement of how
-        accurate a player&rsquo;s position will be.
+        accurate a player&rsquo;s position will be. Check the far baseline most closely: a pixel is
+        worth the most there, and clicks that are all off together can still agree with each other.
       </p>
 
       {calibration.warnings.length > 0 ? (

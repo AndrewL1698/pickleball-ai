@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from pickleball_api.calibration import (
@@ -13,9 +14,11 @@ from pickleball_api.calibration import (
     CalibrationRejected,
     CourtLandmark,
     calibration_warnings,
+    far_baseline_feet_per_pixel,
     fit_calibration,
 )
 from pickleball_api.testing import REPO_ROOT
+from pickleball_ml.court.geometry import apply_homography
 from pickleball_ml.court.spec import LANDMARKS
 
 ANNOTATED = sorted((REPO_ROOT / "data" / "annotations").glob("*/calibration_points*.json"))
@@ -95,6 +98,24 @@ def test_a_large_error_asks_for_a_review(mean: float, largest: float) -> None:
 def test_landmarks_on_one_half_warn_about_the_other() -> None:
     near = {name: point for name, point in LANDMARKS.items() if name.startswith("near")}
     assert any("extrapolated" in warning for warning in calibration_warnings(near, 0.1, 0.2))
+
+
+def test_a_pixel_at_the_far_baseline_is_worth_what_the_homography_says() -> None:
+    """X = x / 2 and Y = y / 4, so a pixel is at most half a foot, right or left."""
+    homography = [[0.5, 0.0, 0.0], [0.0, 0.25, 0.0], [0.0, 0.0, 1.0]]
+    assert far_baseline_feet_per_pixel(homography) == pytest.approx(0.5)
+
+
+def test_a_real_camera_pays_more_at_the_far_baseline_than_the_near_one() -> None:
+    points = points_from(next(path for path in ANNOTATED if path.parent.name == "buzz"))
+    fitted = fit_calibration(points, **ANY_FRAME)
+    far = far_baseline_feet_per_pixel(fitted.homography)
+    assert far is not None and 0.1 < far < 1.0
+
+    image_to_court = np.array(fitted.homography)
+    near = apply_homography(np.linalg.inv(image_to_court), [[0.0, -22.0]])[0]
+    moved = apply_homography(image_to_court, near + np.eye(2)) - [0.0, -22.0]
+    assert far > 3 * float(np.linalg.norm(moved, 2))
 
 
 def test_the_api_does_not_import_torch_or_ultralytics() -> None:

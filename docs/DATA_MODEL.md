@@ -75,6 +75,7 @@ average_fps            # an average: phone video is often variable frame rate
 duration_seconds       # frame_count / average_fps, so an estimate
 frame_count
 metadata_extracted_at  # null until decoded; the decoded fields arrive together
+camera_jumps           # JSON: where sampled frames show a move. Empty: none found. Null: not checked
 created_at
 ```
 
