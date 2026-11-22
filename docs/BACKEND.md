@@ -179,9 +179,12 @@ far baseline, or null if that line cannot be projected, and `warnings` is fixed 
 for anything to review.
 
 `video.camera_jumps` lists where sampled frames show the camera moved, each with
-`from_seconds`, `to_seconds` and `shift_px`. An empty list means checked with no move
-found. Null means not checked: the video was processed before the check existed, or its
-frames could not all be compared. A move and back between two samples would not show.
+`from_seconds`, `to_seconds` and `shift_px`. A move is either a bump between two
+neighbouring samples or creep: small steps that add up past the same 20 px since the
+camera last came to rest. An empty list means checked with no move found. Null means not
+checked: the video was processed before the check existed, a requested frame did not
+decode, a pair of frames could not be compared, or the check itself failed (that is
+logged and does not fail the job). A move and back between two samples would not show.
 
 `MatchSummary` (each item of `GET /api/matches`) is the same without `jobs`, the
 `can_*` flags, `reference_frames` and `calibration`.

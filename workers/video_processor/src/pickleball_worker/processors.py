@@ -15,16 +15,18 @@ result names if that fails. A future version running on a separate GPU host does
 not have to change shape.
 """
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from itertools import pairwise
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
+
+import cv2
 
 from pickleball_api.errors import JobErrorCode, JobFailure
 from pickleball_api.models import JobStage, ReferenceFrameKind
 from pickleball_api.storage import ObjectNotFound, Storage, new_storage_key
-from pickleball_ml.court.camera import CAMERA_JUMP_PX, camera_drift
+from pickleball_ml.court.camera import find_camera_moves
 from pickleball_ml.video.reader import (
     Frame,
     VideoReadError,
@@ -45,6 +47,8 @@ SAMPLE_STILLS = 3
 
 #: Far past any JPEG these can make; the limit is only there because `write` asks.
 MAX_STILL_BYTES = 64 * 1024 * 1024
+
+logger = logging.getLogger(__name__)
 
 #: Called with the stage reached and how far through the job is, 0.0 to 1.0.
 ProgressReporter = Callable[[JobStage, float], None]
@@ -94,7 +98,8 @@ class StoredStill:
 
 @dataclass(frozen=True)
 class CameraJump:
-    """The camera moved somewhere between two neighbouring sampled frames."""
+    """The camera was in one place at `from_seconds` and another by `to_seconds`: a
+    bump between two neighbouring sampled frames, or creep across several."""
 
     from_seconds: float
     to_seconds: float
@@ -192,7 +197,7 @@ class CalibrationPreparationProcessor:
     """
 
     name = "calibration_preparation"
-    version = "2"
+    version = "3"
 
     def process(
         self, video: VideoRef, storage: Storage, report: ProgressReporter
@@ -254,21 +259,25 @@ def _decode_samples(
     return frames
 
 
-def _camera_jumps(frames: list[tuple[float, Frame]]) -> tuple[CameraJump, ...] | None:
-    """Where neighbouring frames show the camera moved.
+def _camera_jumps(
+    frames: list[tuple[float, Frame]], requested: int = BACKGROUND_SAMPLES
+) -> tuple[CameraJump, ...] | None:
+    """Where the frames show the camera moved: a bump between neighbours, or creep.
 
-    A pair that could not be compared might be hiding a move, so "no move found"
-    needs every pair to have been compared. A move that was found stands regardless.
+    "No move found" needs every requested frame to have decoded and every neighbouring
+    pair to have been compared; otherwise part of the video was never looked at. A move
+    that was found stands regardless. The check is advice, so an OpenCV failure in it
+    leaves the video unchecked rather than failing the job.
     """
-    samples = camera_drift(frames)
-    jumps = tuple(
-        CameraJump(before.time_s, after.time_s, after.step_px)
-        for before, after in pairwise(samples)
-        if after.step_px is not None and after.step_px > CAMERA_JUMP_PX
-    )
+    try:
+        check = find_camera_moves(frames)
+    except cv2.error:
+        logger.warning("camera check failed; leaving the video unchecked", exc_info=True)
+        return None
+    jumps = tuple(CameraJump(move.from_s, move.to_s, move.shift_px) for move in check.moves)
     if jumps:
         return jumps
-    if len(samples) < 2 or any(sample.step_px is None for sample in samples[1:]):
+    if not check.complete or len(frames) < requested:
         return None
     return ()
 

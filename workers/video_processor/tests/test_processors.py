@@ -15,7 +15,7 @@ import pytest
 from pickleball_api.errors import JobErrorCode, JobFailure
 from pickleball_api.models import JobStage
 from pickleball_api.storage import LocalFileStorage, new_storage_key
-from pickleball_ml.court.camera import DriftSample
+from pickleball_ml.court.camera import CameraMove, CameraMoveCheck
 from pickleball_ml.video.reader import InvalidVideoMetadata, VideoMetadata, VideoReadError
 from pickleball_worker import processors
 from pickleball_worker.processors import (
@@ -262,32 +262,62 @@ def test_a_moved_camera_is_found_between_the_frames_either_side_of_it() -> None:
 
 def test_a_steady_camera_was_checked_and_has_no_jumps() -> None:
     frames = [(float(t), textured_frame()) for t in range(4)]
-    assert processors._camera_jumps(frames) == ()
+    assert processors._camera_jumps(frames, requested=4) == ()
+
+
+def test_a_camera_that_creeps_is_found_although_no_step_is_large() -> None:
+    frames = [(float(t), textured_frame(t)) for t in (0, 8, 16, 24, 32)]
+    jumps = processors._camera_jumps(frames, requested=5)
+    assert jumps is not None and len(jumps) == 1
+    assert (jumps[0].from_seconds, jumps[0].to_seconds) == (0.0, 24.0)
+    assert jumps[0].shift_px == pytest.approx(24, abs=2)
+
+
+def test_frames_that_did_not_decode_leave_the_video_unchecked() -> None:
+    frames = [(float(t), textured_frame()) for t in range(4)]
+    assert processors._camera_jumps(frames, requested=25) is None
 
 
 def test_frames_with_nothing_to_compare_were_not_checked() -> None:
-    assert processors._camera_jumps(fake_frames(5)) is None
+    assert processors._camera_jumps(fake_frames(5), requested=5) is None
 
 
 def test_one_frame_cannot_show_a_move() -> None:
-    assert processors._camera_jumps([(0.0, textured_frame())]) is None
+    assert processors._camera_jumps([(0.0, textured_frame())], requested=1) is None
 
 
 @pytest.mark.parametrize(
-    ("steps", "expected"),
+    ("moves", "complete", "expected"),
     [
-        ((1.0, None, 2.0), None),
-        ((1.0, None, 90.0), 1),
+        ((), False, None),
+        ((CameraMove(1.0, 2.0, 90.0),), False, 1),
     ],
 )
 def test_a_pair_that_cannot_be_compared_rules_out_no_move_but_not_a_found_one(
-    steps: tuple[float | None, ...], expected: int | None, monkeypatch: pytest.MonkeyPatch
+    moves: tuple[CameraMove, ...],
+    complete: bool,
+    expected: int | None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    samples = [DriftSample(0.0, 0.0, None)]
-    samples += [DriftSample(float(i + 1), 0.0, step) for i, step in enumerate(steps)]
-    monkeypatch.setattr(processors, "camera_drift", lambda frames: samples)
-    jumps = processors._camera_jumps([])
+    monkeypatch.setattr(
+        processors, "find_camera_moves", lambda frames: CameraMoveCheck(moves, complete)
+    )
+    jumps = processors._camera_jumps([], requested=0)
     assert (None if jumps is None else len(jumps)) == expected
+
+
+def test_an_opencv_failure_leaves_the_video_unchecked_instead_of_failing_the_job(
+    ref: VideoRef, storage: LocalFileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(frames: object) -> CameraMoveCheck:
+        raise cv2.error("matcher failed")
+
+    monkeypatch.setattr(processors, "find_camera_moves", broken)
+    monkeypatch.setattr(processors, "read_metadata", lambda path: decoded())
+    monkeypatch.setattr(processors, "sample_frames", lambda path, seconds: fake_frames(5))
+    result = prepare(ref, storage)
+    assert result.camera_jumps is None
+    assert len(result.stills) == 4
 
 
 def test_preparing_a_video_returns_the_camera_check(

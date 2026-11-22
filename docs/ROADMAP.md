@@ -300,16 +300,26 @@ Status (2026-11-01): calibration fix-up, from those findings.
 - A job now compares neighbouring sampled frames for a moved camera
   (`pickleball_ml.court.camera`), and the calibrate page warns before any landmark is
   placed. Migration `0007_camera_jumps`. Null means not checked, which is every video
-  processed earlier, and there is no way to check one short of uploading it again. At 25
-  frames per video:
+  processed earlier, and there is no way to check one short of uploading it again. A
+  move is a step between neighbouring samples over 20 px, or creep: the steps chained
+  together since the camera last came to rest, over the same 20 px. Creep is chained
+  rather than measured against the resting frame directly, because outdoors frames an
+  hour apart match badly: on `gold` that direct comparison swings between 7 and 21 px
+  while no step is over 7 px. "No move found" needs all 25 frames decoded and every pair
+  compared, and an OpenCV failure in the check leaves the video unchecked instead of
+  failing the job. At 25 frames per video:
 
-  | Clip | Length | Largest step | Reported |
-  |---|---|---|---|
-  | `riggs` | 15.4 min | 107.4 px | Moved between 5:50 and 6:27 (known: 6:08) |
-  | `gold` | 78.6 min | 6.7 px | Nothing |
-  | `buzz` | 14.7 min | 4.0 px | Nothing |
-  | `pro63` | 21.0 min | 0.9 px | Nothing |
-  | `testclip` | 17.2 min | 0.4 px | Nothing |
+  | Clip | Length | Largest step | Largest creep | Reported |
+  |---|---|---|---|---|
+  | `riggs` | 15.4 min | 107.4 px | 0.9 px | Moved between 5:50 and 6:27 (known: 6:08) |
+  | `gold` | 78.6 min | 6.7 px | 15.9 px | Nothing |
+  | `buzz` | 14.7 min | 4.0 px | 4.8 px | Nothing |
+  | `pro63` | 21.0 min | 0.9 px | 1.3 px | Nothing |
+  | `testclip` | 17.2 min | 0.4 px | 0.7 px | Nothing |
+
+  `gold`'s outdoor creep comes within 4.1 px of the threshold, so a longer or windier
+  outdoor match could be flagged as moved. Creep on `riggs` is measured apart from its
+  move.
 
   It detects and warns, because moving cameras are out of MVP scope. With one moved clip
   the 20 px threshold is confirmed against four steady clips, not tuned on many moves, and
