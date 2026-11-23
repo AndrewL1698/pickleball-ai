@@ -37,7 +37,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
 
 
 class Base(DeclarativeBase):
@@ -246,6 +246,19 @@ class Match(Base):
         # which is how the ORM gets through the cycle with `model_runs`.
         post_update=True,
     )
+
+    @validates("current_identify_run")
+    def _check_shown_run(self, _key: str, run: "ModelRun | None") -> "ModelRun | None":
+        """Only an Identify run of this match. The foreign key proves no more than
+        that the run exists, and a match pointing at another match's run would
+        stop that match from ever being deleted."""
+        if run is None:
+            return None
+        if run.stage is not ModelRunStage.IDENTIFY:
+            raise ValueError(f"a match shows an Identify run, not a {run.stage.value} run")
+        if run.match is not self:
+            raise ValueError("a match shows only its own runs")
+        return run
 
     @property
     def latest_calibration(self) -> "CourtCalibration | None":
@@ -534,7 +547,7 @@ class CourtCalibration(Base):
     )
 
 
-def config_hash(config: dict[str, Any]) -> str:
+def hash_config(config: dict[str, Any]) -> str:
     """A run configuration's SHA-256, the same whatever order its keys are in.
 
     Two runs with the same hash and model version were asked to do the same
@@ -562,7 +575,7 @@ class ModelRun(Base):
     stage: Mapped[ModelRunStage] = mapped_column(_enum_column(ModelRunStage, "model_run_stage"))
     model_version: Mapped[str] = mapped_column(String(128))
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON)
-    #: `config_hash(config_json)`, as hex.
+    #: `hash_config(config_json)`, as hex.
     config_hash: Mapped[str] = mapped_column(String(64))
     #: Null until the run has written its artifact.
     artifact_storage_key: Mapped[str | None] = mapped_column(String(512), unique=True, default=None)
@@ -619,7 +632,7 @@ class ModelRun(Base):
             stage=stage,
             model_version=model_version,
             config_json=config,
-            config_hash=config_hash(config),
+            config_hash=hash_config(config),
             parent_run=parent,
             started_at=utcnow(),
         )

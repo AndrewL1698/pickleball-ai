@@ -77,3 +77,14 @@ def test_a_detect_run_reads_no_other_run() -> None:
         ModelRun.start(
             match, ModelRunStage.DETECT, model_version="v", config={}, parent=detect(match)
         )
+
+
+def test_a_match_shows_only_an_identify_run_of_its_own() -> None:
+    """The foreign key only proves the run exists. Pointing at another match's
+    run would also stop that match from ever being deleted."""
+    match, elsewhere = Match(name="m"), Match(name="other")
+    with pytest.raises(ValueError):
+        match.current_identify_run = identify(elsewhere, detect(elsewhere))
+    with pytest.raises(ValueError):
+        match.current_identify_run = detect(match)
+    match.current_identify_run = None  # showing nothing is always allowed

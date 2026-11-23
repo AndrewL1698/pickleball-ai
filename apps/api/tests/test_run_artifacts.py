@@ -20,8 +20,8 @@ def detections() -> pd.DataFrame:
         {
             "frame": pd.Series([0, 0, 2], dtype="int64"),
             "track_id": pd.Series([7, 9, 7], dtype="int32"),
-            "foot_x": [612.5, 1301.0, 615.25],
-            "foot_y": [880.0, 402.5, 884.0],
+            "ground_x": [612.5, 1301.0, 615.25],
+            "ground_y": [880.0, 402.5, 884.0],
             "confidence": pd.Series([0.91, 0.42, None], dtype="float32"),
             "cut_off": [False, True, False],
         }

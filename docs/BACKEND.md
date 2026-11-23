@@ -252,14 +252,16 @@ CASCADE`), `source` (`manual`), `image_points`, `court_points`, `homography`,
 are only added: the newest is in force, so a recalibration destroys nothing.
 
 `model_runs`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `stage` (`detect` or
-`identify`), `model_version`, `config_json`, `config_hash` (SHA-256 of the config with
-sorted keys, from `models.config_hash`), `artifact_storage_key` (nullable until the
+`identify`), `model_version`, `config_json` (which records the `calibration_id` the run
+used: the court gate's for Detect, the projection's for Identify, per ADR 0001), `config_hash` (SHA-256 of the config with
+sorted keys, from `models.hash_config`), `artifact_storage_key` (nullable until the
 artifact is written; unique, never returned), `started_at`, `completed_at` (null
 while running), `parent_run_id` (FK to `model_runs`). A CHECK requires an `identify`
 run to have a parent and a `detect` run to have none, and another requires
 `completed_at >= started_at`. Indexed on `(match_id, started_at)`. Make runs with
 `ModelRun.start`, which also refuses an Identify run whose parent is not a Detect run
-of the same match. Runs are only added, and neither foreign key into `model_runs`
+of the same match. `Match.current_identify_run` accepts only an Identify run of
+that match. Runs are only added, and neither foreign key into `model_runs`
 cascades, so a run that a match shows or another run read cannot be deleted on its own.
 Deleting the match removes all of them.
 
@@ -425,7 +427,8 @@ A model run's output is one Parquet file, written and read with
 DataFrame (without its index) under a fresh random `.parquet` key and sets
 `run.artifact_storage_key`. The caller commits, using `discard_on_error` if that
 commit can fail. A run that already has an artifact is refused with
-`ArtifactAlreadyWritten`, because runs are never overwritten. `read_run_artifact`
+`ArtifactAlreadyWritten`, because runs are never overwritten. Both errors derive from
+`RunArtifactError`, not `StorageError`, because they are about the run, not the store. `read_run_artifact`
 reads it back through `local_path`. It raises `NoArtifact` for a run that never wrote
 one, and `ObjectNotFound` if the file is gone.
 

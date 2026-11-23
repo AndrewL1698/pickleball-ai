@@ -8,10 +8,10 @@ requires-python = ">=3.13,<3.14"
 dependencies = [
     "alembic>=1.14",
     "fastapi>=0.115",
+    # pandas and pyarrow: model-run artifacts are Parquet (`run_artifacts.py`).
     "pandas>=2.2",
     "pickleball-ml",
     "psycopg[binary]>=3.2",
-    # Model-run artifacts are Parquet (`run_artifacts.py`).
     "pyarrow>=18",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",

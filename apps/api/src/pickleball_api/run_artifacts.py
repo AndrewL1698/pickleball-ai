@@ -15,16 +15,24 @@ import io
 import pandas as pd
 
 from pickleball_api.models import ModelRun
-from pickleball_api.storage import Storage, StorageError, new_storage_key
+from pickleball_api.storage import Storage, new_storage_key
 
 EXTENSION = ".parquet"
 
 
-class ArtifactAlreadyWritten(StorageError):
+class RunArtifactError(Exception):
+    """A run's artifact cannot be written or read, because of the run's state.
+
+    Not a `StorageError`: nothing is wrong with the store. A failure in the store
+    itself still raises the store's own errors, such as `ObjectNotFound`.
+    """
+
+
+class ArtifactAlreadyWritten(RunArtifactError):
     """The run already has an artifact, and runs are never overwritten."""
 
 
-class NoArtifact(StorageError):
+class NoArtifact(RunArtifactError):
     """The run has not written an artifact."""
 
 

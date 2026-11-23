@@ -325,7 +325,7 @@ id
 match_id
 stage                # detect / identify for now; later stages add members
 model_version        # names the model as well as its version
-config_json
+config_json          # includes calibration_id: the calibration the run used (ADR 0001)
 config_hash          # SHA-256 of config_json with sorted keys
 artifact_storage_key # nullable until written; the run's Parquet output
 started_at
