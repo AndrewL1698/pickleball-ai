@@ -36,3 +36,12 @@ def draw_zoom_inset(image: Frame, cursor: tuple[int, int], zoom: int, size: int)
     image[top:top + zoomed.shape[0], left:left + zoomed.shape[1]] = zoomed
     cv2.rectangle(image, (left, top),
                   (left + zoomed.shape[1] - 1, top + zoomed.shape[0] - 1), (255, 255, 255), 1)
+
+
+def draw_banner(image: Frame, status: str, keys: str, keys_scale: float = 0.55) -> None:
+    """Status line and key help in a black band across the top, drawn in place."""
+    cv2.rectangle(image, (0, 0), (image.shape[1], 56), (0, 0, 0), -1)
+    cv2.putText(image, status, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
+                cv2.LINE_AA)
+    cv2.putText(image, keys, (10, 46), cv2.FONT_HERSHEY_SIMPLEX, keys_scale, (180, 220, 255),
+                1, cv2.LINE_AA)

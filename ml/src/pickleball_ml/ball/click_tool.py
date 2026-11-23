@@ -15,7 +15,7 @@ from typing import Any
 import cv2
 
 from pickleball_ml.evaluation.ball import SCHEMA
-from pickleball_ml.video.labeling import draw_zoom_inset, load_frames
+from pickleball_ml.video.labeling import draw_banner, draw_zoom_inset, load_frames
 from pickleball_ml.video.reader import Frame
 
 WINDOW = "pbml label-ball"
@@ -111,10 +111,6 @@ def _render(
         x, y = existing["xy"]
         cv2.circle(out, (round(x), round(y)), 12, (0, 255, 0), 2)
     draw_zoom_inset(out, cursor, ZOOM, INSET)
-    cv2.rectangle(out, (0, 0), (out.shape[1], 56), (0, 0, 0), -1)
-    cv2.putText(out, status, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
-                cv2.LINE_AA)
-    cv2.putText(out, HELP, (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 220, 255), 1,
-                cv2.LINE_AA)
+    draw_banner(out, status, HELP)
     return out
 

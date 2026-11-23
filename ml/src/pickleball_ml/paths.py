@@ -13,11 +13,12 @@ DEFAULT_PROCESSED_ROOT = Path("data/processed")
 DEFAULT_ANNOTATIONS_ROOT = Path("data/annotations")
 
 
-def ground_contact_labels_path(
-    clip_id: str, annotations_root: Path = DEFAULT_ANNOTATIONS_ROOT
-) -> Path:
-    """Hand-clicked ground-contact points for one clip, across all its windows."""
-    return annotations_root / clip_id / "ground_contact_labels.json"
+def ground_contact_labels_path(clip_id: str) -> Path:
+    """Hand-clicked ground-contact points for one clip, across all its windows.
+
+    The labeling tool writes here and the evaluate stage reads from here.
+    """
+    return DEFAULT_ANNOTATIONS_ROOT / clip_id / "ground_contact_labels.json"
 
 
 @dataclass(frozen=True)

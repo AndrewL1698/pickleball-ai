@@ -1,4 +1,4 @@
-"""Player position error against hand-clicked ground-contact points.
+"""Error of predicted player ground-contact points against hand-clicked ones.
 
 Label file (`data/annotations/<clip>/ground_contact_labels.json`, schema
 "pbml.ground_contact_labels/v1"), one per clip, written by `pbml label-ground-contact`:
@@ -16,8 +16,10 @@ Label file (`data/annotations/<clip>/ground_contact_labels.json`, schema
 A labeled frame is complete: every court player visible in it has a point, so a
 predicted player with no label nearby is an extra prediction, not an unlabeled one.
 A point is `unsure` when the feet are hidden (behind another player, below the
-frame edge) or off the ground, so the click is a guess; it still absorbs a nearby prediction but is
-left out of every error figure. A `skip` frame was not labeled at all.
+frame edge) or off the ground, so the click is a guess; it still absorbs a nearby
+prediction but is left out of every error figure. A `skip` frame was not labeled.
+Frames are keyed by window and frame number, so overlapping windows of a clip can
+each label the same frame.
 
 Predicted and labeled points are matched one-to-one within each frame; a pair is
 allowed when the points are at most half the predicted box's height apart, so the
@@ -30,7 +32,7 @@ calibration's own error cancels out. Depth error is the signed court-y differenc
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -39,6 +41,7 @@ from pickleball_ml.court.geometry import FloatArray, apply_homography
 
 SCHEMA = "pbml.ground_contact_labels/v1"
 MAX_MATCH_BOX_HEIGHTS = 0.5
+Side = Literal["near", "far"]
 
 
 @dataclass(frozen=True)
@@ -68,12 +71,13 @@ def parse_ground_contact_labels(data: dict[str, Any]) -> list[GroundContactFrame
     if data.get("schema") != SCHEMA:
         raise ValueError(f"expected schema {SCHEMA!r}, got {data.get('schema')!r}")
     frames: list[GroundContactFrame] = []
-    seen: set[int] = set()
+    seen: set[tuple[str, int]] = set()
     for raw in data["frames"]:
         number = int(raw["frame_number"])
-        if number in seen:
-            raise ValueError(f"frame {number} is labeled twice")
-        seen.add(number)
+        window = str(raw.get("window", ""))
+        if (window, number) in seen:
+            raise ValueError(f"frame {number} of window {window!r} is labeled twice")
+        seen.add((window, number))
         if raw.get("skip"):
             continue
         points = []
@@ -84,7 +88,7 @@ def parse_ground_contact_labels(data: dict[str, Any]) -> list[GroundContactFrame
             points.append(GroundContactPoint(xy=(float(xy[0]), float(xy[1])),
                                              unsure=bool(point.get("unsure", False))))
         frames.append(GroundContactFrame(
-            frame_number=number, window=str(raw.get("window", "")),
+            frame_number=number, window=window,
             split=str(raw.get("split", "unspecified")), points=tuple(points),
         ))
     return frames
@@ -95,30 +99,35 @@ class _Error:
     px: float
     ft: float
     depth_ft: float
-    truncated: bool  # the matched prediction's box is cut off by the bottom of the frame
 
 
 @dataclass(frozen=True)
 class _Outcome:
-    """One labeled point, the half of the court it is on, and its error if matched."""
+    """One labeled point: its side, the matched prediction's truncation, and its error.
 
-    side: str  # "near" or "far"
+    `truncated` is None when nothing matched. `error` is None when nothing matched or
+    the point is unsure.
+    """
+
+    side: Side
+    truncated: bool | None
+    unsure: bool
     error: _Error | None
-    unsure: bool = False
 
 
 def evaluate_ground_contact(
     players: pd.DataFrame, labels: list[GroundContactFrame], homography: FloatArray,
     max_match_box_heights: float = MAX_MATCH_BOX_HEIGHTS,
 ) -> dict[str, Any]:
-    """Position error of predicted player ground-contact points against labeled ones.
+    """Error of predicted player ground-contact points against labeled ones.
 
     `players` are player track rows (`frame_number`, `image_x`, `image_y`, `y1`, `y2`,
     `truncated`). The report has the number of extra predictions (predicted players in
     labeled frames that match no label) and metrics for these groups of labeled points:
-    all; near and far (the half of the court the label is on); truncated and
-    not_truncated (whether the matched prediction's box is cut off by the frame edge,
-    so unmatched points are in neither).
+    all; near and far (the label's side of the court); truncated and not_truncated
+    (whether the matched prediction's box is cut off by the bottom of the frame). Only
+    matched points have a truncation, so those two groups never count a miss; their
+    unsure counts show how many such predictions could not be checked.
     """
     by_frame = {cast(int, f): g for f, g in players.groupby("frame_number")}
     outcomes: list[_Outcome] = []
@@ -136,27 +145,26 @@ def evaluate_ground_contact(
         extras += len(predicted) - sum(j is not None for j in pairs)
         for label, j in zip(frame.points, pairs, strict=True):
             label_court = apply_homography(homography, np.array([label.xy]))[0]
-            side = "near" if label_court[1] < 0 else "far"
-            if label.unsure:
-                outcomes.append(_Outcome(side, None, unsure=True))
-                continue
-            if j is None:
-                outcomes.append(_Outcome(side, None))
-                continue
-            court = apply_homography(homography, predicted[j:j + 1, :2])[0]
-            outcomes.append(_Outcome(side, _Error(
-                px=float(np.hypot(*(predicted[j, :2] - np.array(label.xy)))),
-                ft=float(np.hypot(*(court - label_court))),
-                depth_ft=float(court[1] - label_court[1]),
-                truncated=bool(truncated[j]),
-            )))
+            side: Side = "near" if label_court[1] < 0 else "far"
+            error = None
+            if j is not None and not label.unsure:
+                court = apply_homography(homography, predicted[j:j + 1, :2])[0]
+                error = _Error(
+                    px=float(np.hypot(*(predicted[j, :2] - np.array(label.xy)))),
+                    ft=float(np.hypot(*(court - label_court))),
+                    depth_ft=float(court[1] - label_court[1]),
+                )
+            outcomes.append(_Outcome(
+                side=side, truncated=None if j is None else bool(truncated[j]),
+                unsure=label.unsure, error=error,
+            ))
     return {
         "extra_predictions": extras,
         "all": _metrics(outcomes),
         "near": _metrics([o for o in outcomes if o.side == "near"]),
         "far": _metrics([o for o in outcomes if o.side == "far"]),
-        "truncated": _metrics([o for o in outcomes if o.error and o.error.truncated]),
-        "not_truncated": _metrics([o for o in outcomes if o.error and not o.error.truncated]),
+        "truncated": _metrics([o for o in outcomes if o.truncated is True]),
+        "not_truncated": _metrics([o for o in outcomes if o.truncated is False]),
     }
 
 

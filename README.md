@@ -351,11 +351,11 @@ Label honestly or the metrics are worthless:
 - For the ball, `absent` is a claim that the ball is not visible, not that you
   did not find it; use `unsure` when you are not certain.
 
-### Ground-contact points (player position error)
+### Ground-contact points
 
-Position error compares where the tracker puts each player's ground-contact point
-(the bottom centre of the box) with where a person clicks it. Run the `track`
-stage for the window first; the tool samples frames the tracker processed.
+Ground-contact error compares where the tracker puts each player's ground-contact
+point (the bottom centre of the box) with where a person clicks it. Run the
+`track` stage for the window first; the tool samples frames the tracker processed.
 
 ```bash
 # About ten frames spread over the window, roughly 30-40 points
@@ -364,18 +364,20 @@ uv run pbml label-ground-contact experiments/phase0b.json --window buzz_a --fram
 ```
 
 Click where each court player's feet meet the court: between the feet for a
-standing player and under the planted foot for a stride. A magnifier follows the cursor; predicted boxes are not shown.
-Keys: `u` marks the last point unsure, `z` undoes it, `n` or space finishes the
-frame, `s` skips it, `b` goes back (dropping unfinished clicks), enter saves and
-quits, esc aborts. Every finished frame is saved straight away, so you can stop
-and resume; running the tool on a clip's other windows adds to the same
-`data/annotations/<clip>/ground_contact_labels.json`.
+standing player and under the planted foot for a stride. A magnifier follows the
+cursor; predicted boxes are not shown. Keys: `u` marks the last point unsure, `z`
+undoes it, `n` or space finishes the frame, `s` skips it, `b` goes back (dropping
+unfinished clicks), enter finishes the frame if you clicked on it and quits, esc
+aborts. Every finished frame is saved straight away, so you can stop and resume.
+Labels always go to `data/annotations/<clip>/ground_contact_labels.json`, one file
+per clip, and running the tool on the clip's other windows adds to it.
 
 - Click every visible court player in a finished frame. A player you leave out
   turns their prediction into an "extra", and a frame with no players is a
   valid label.
 - Mark a point unsure (`u`) when the feet are hidden behind someone or below the
-  frame edge, or the player is in the air. It still claims the nearby prediction but is left out of the error.
+  frame edge, or the player is in the air. It still claims the nearby prediction
+  but is left out of the error.
 - Skip (`s`) a frame you cannot label honestly, such as a pile-up at the net.
 
 The `evaluate` stage picks the file up for every window it has frames for and
@@ -384,10 +386,12 @@ matched one-to-one when they are within half the predicted box height of each
 other. The report gives coverage, extra predictions, and the median and 90th
 percentile error in image pixels and court feet, plus the median signed depth
 error (positive: the tracker puts the player farther from the camera). It is
-split by the half of the court the click is on (near or far) and by whether the
-predicted box is cut off by the bottom of the frame (truncated or not). Both
-points go through the same homography, so the court-feet error measures the
-ground-contact estimate rather than the calibration.
+split by the side of the court the click is on (near or far) and by whether the
+matched box is cut off by the bottom of the frame (truncated or not). Cut-off
+feet can only be guessed, so the truncated group's unsure count says how many of
+those predictions could not be checked. Both points go through the same
+homography, so the court-feet error measures the ground-contact estimate rather
+than the calibration.
 
 ## Initial Recording Constraints
 

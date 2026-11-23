@@ -40,6 +40,9 @@ def test_rejects_malformed_label_files() -> None:
     with pytest.raises(ValueError, match="labeled twice"):
         parse_ground_contact_labels({"schema": SCHEMA,
                                      "frames": [frame(1, [0, 0]), frame(1, [5, 5])]})
+    # Overlapping windows of a clip may each label the same frame.
+    assert len(parse_ground_contact_labels({"schema": SCHEMA, "frames": [
+        frame(1, [0, 0], window="a"), frame(1, [5, 5], window="b")]})) == 2
     with pytest.raises(ValueError, match="needs an xy"):
         parse_ground_contact_labels({"schema": SCHEMA, "frames": [
             {"frame_number": 1, "points": [{"unsure": True}]}]})
@@ -126,4 +129,7 @@ def test_unsure_points_absorb_a_prediction_but_are_not_scored() -> None:
     assert report["all"]["unsure_points"] == 1
     assert report["all"]["labeled_points"] == 1
     assert report["all"]["median_error_px"] == 10.0
+    # Feet below the frame edge can only be guessed: the truncated group shows how many
+    # cut-off predictions could not be checked.
     assert report["truncated"]["matched"] == 0
+    assert report["truncated"]["unsure_points"] == 1

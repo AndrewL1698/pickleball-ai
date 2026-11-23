@@ -162,8 +162,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--window", required=True)
     p.add_argument("--frames", type=int, default=10,
                    help="number of processed frames to label, spread over the window")
-    p.add_argument("--out", type=Path,
-                   help="label file (default: data/annotations/<clip>/ground_contact_labels.json)")
     p.add_argument("--annotator", default="")
     p.set_defaults(handler=cmd_label_ground_contact)
 
@@ -496,7 +494,7 @@ def cmd_label_ground_contact(args: argparse.Namespace, _outputs: object) -> int:
         raise FileNotFoundError(f"run the track stage for {window.id} first")
     processed = pd.read_parquet(outputs.detections_raw, columns=["frame_number"])
     frames = spread_frames(sorted({int(f) for f in processed["frame_number"]}), args.frames)
-    output = args.out or ground_contact_labels_path(window.clip)
+    output = ground_contact_labels_path(window.clip)
     count = label_ground_contacts(
         experiment.clips[window.clip].video, frames, output, clip=window.clip,
         window=window.id, split=window.split, annotator=args.annotator,
