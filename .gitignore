@@ -70,3 +70,6 @@ pnpm-debug.log*
 .idea/
 .vscode/
 *.swp
+
+# --- Claude Code ---
+.claude/worktrees/

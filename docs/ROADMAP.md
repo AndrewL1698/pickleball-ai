@@ -374,9 +374,12 @@ Clicking a player's location in the video produces the correct approximate locat
 
 ## Phase 3 - Player Tracking
 
-Status (2026-11-01): next, not started.
+Status (2026-11-22): in progress. Design settled; nothing built yet.
 
-Harden the Phase 0 prototype and move it into the worker.
+Harden the Phase 0 prototype and move it into the worker. Selection, ID-switch recovery,
+partner assignment, linking across changeovers and the confidence margins already exist
+in `pickleball_ml.players`, but only as CLI stages over short windows with changeover
+times typed in by hand. Terms below follow `GLOSSARY.md`.
 
 Build:
 
@@ -388,15 +391,87 @@ Build:
 - court-coordinate player tracks (Parquet)
 - animated top-down playback in the web app
 
+Design decisions (2026-11-22):
+
+- **Trigger.** Saving a calibration queues a players job on `analysis_jobs`, and the job
+  ends at `players_ready`. The match page shows its progress.
+- **Two stages.** *Detect* (YOLO, court gate, ByteTrack) is slow and writes raw
+  detections with image-space ground-contact points. *Identify* (selection, partner
+  assignment, changeover linking, projection into court coordinates) takes seconds and
+  writes the player tracks. Each run gets a `ModelRun` row (new table and migration) and a
+  Parquet artifact stored through `Storage`. See
+  [ADR 0001](adr/0001-image-coordinates-are-the-source-of-truth-for-player-tracks.md):
+  recalibration, changeover edits and identity corrections re-run Identify only, as a
+  small queued job, and never Detect.
+- **Whole video, in checkpoints.** Detect covers the whole video, in 5-minute chunks
+  processed in order and checkpointed, so a stop for any reason (crash, time limit, a
+  future quota) loses only the current chunk and a retry resumes. Identify runs on
+  whatever Detect has finished, so playback works for the processed part and the match
+  says "Players tracked up to 34:10".
+- **Detection rate is set in time**, about 15 detections per second, whatever the
+  video's frame rate.
+- **A camera that moved.** This answers the question carried over from Phase 2. Only the
+  steady part of the video that contains the calibration's reference frame is tracked.
+  The rest is reported as not processed ("the camera moved at 6:08"). Calibrating each
+  steady part separately is out of MVP scope.
+- **Ground-contact point** stays the bottom-centre of the box, and boxes cut off by the
+  frame edge are marked unreliable. Position error is measured before any pose model is
+  considered.
+- **Team A** is the team on the near end when the match starts. Players are numbered 1-4
+  by team, and within a team by slot when the players are first resolved. These numbers
+  stay the same across Identify runs. Users rename players later.
+- **Slot left/right** is taken from the player's own point of view (right slot = even
+  court), not from the court axes. The court axes stay as they are for calibration
+  landmarks. Today's code uses the court axes and has to change.
+- **Changeovers** are proposed by Identify from every player crossing the net line within
+  a short span. The match page lists them, with seek, confirm and reject buttons and "Add
+  changeover here". Each edit re-runs Identify. An unconfirmed proposal is still used, but
+  is shown as uncertain.
+- **One identity correction in Phase 3**: "swap these partners". Every wrong identity in
+  Phase 0b was two partners swapped after a changeover. A swap is stored in a new
+  `PredictionCorrection` table against a time range (the period's start and end when the
+  user made the correction), not against a period number. If a later changeover edit
+  means the range no longer covers exactly one period, the swap is marked "needs review"
+  and not silently applied. All other identity corrections wait for Phase 7.
+- **Runs are kept.** Every Detect and Identify run keeps its row and artifact, and the
+  match points at its current Identify run. The original prediction survives
+  corrections. Pruning waits until storage matters.
+- **Playback.** The metadata job also makes an H.264 MP4 playback copy (720p, or smaller
+  if the source is smaller), streamed with range requests. The original stays untouched
+  for the CV stages. A one-off CLI command makes copies for existing videos; until then,
+  the page says "playback not available yet". The API serves player positions as
+  column-wise JSON at about 10 Hz, and the top-down court follows the video's
+  `currentTime`.
+- **Uncertainty on the court.** A player whose identity is not confident is a hollow
+  marker with "?". An unreliable ground-contact point is greyed out. A player unseen for
+  more than about 1 s is removed rather than frozen in place.
+
 Metrics:
 
 - ID switches
 - tracking coverage
 - position error on manually sampled frames
 
+Evaluation: full worker runs on the five Phase 0b videos, scored against the existing
+`player_labels_*.json` windows, with `pro63_hard` held out, plus about 30 hand-clicked
+ground-contact labels per video for position error. Results go in
+`docs/PHASE_3_RESULTS.md`.
+
 Exit criteria:
 
-All four players remain mostly correctly identified through multiple rallies.
+All four players remain mostly correctly identified through multiple rallies. On the
+held-out data, that means:
+
+- identity accuracy at least 0.85 before any user input
+- identity accuracy at least 0.95 after changeovers are confirmed and partner swaps made
+- every wrong identity row flagged as not confident
+
+Coverage is reported but not required, because most of it is lost to players standing
+outside the frame (Phase 0b).
+
+Later: process and publish one **Game** at a time instead of fixed chunks, so if a long
+upload hits a limit, the games before it are still finished. This waits until game
+boundaries can be found from rallies (Phase 5 onward) or marked by the user.
 
 ---
 
@@ -559,6 +634,66 @@ Example output:
 Once the rest works, replace or supplement manual calibration with a court keypoint detector.
 
 Always preserve manual override.
+
+---
+
+## Phase 13 - Social & Ratings
+
+Status (2026-11-22): idea, after the MVP. Scope: a portfolio project for a real friend
+group, not a public product. Terms follow `GLOSSARY.md`.
+
+Turn the app into something like FotMob for pickleball. Every player gets a **match
+rating** for each match, friends form **groups** with a leaderboard, and each user can
+follow their ratings over time.
+
+Depends on: Phase 6 (basic analytics), Phase 7 (corrections), and the four-corner
+calibration proposed in Phase 2, because friends will calibrate on a phone. It does not
+wait for Phase 12. The v1 rating also depends on Phase 10.
+
+Build:
+
+- user accounts. Which auth library or provider is open, decided when this phase starts
+  and recorded as an ADR.
+- groups: join by invite link; a user can be in several. A match is shared into one or
+  more groups.
+- tagging: the uploader links each of the match's four players to a user or marks them a
+  guest. A tagged user must accept before the match shows on their profile or counts on a
+  leaderboard. Guests count for nothing.
+- game scores: the uploader types in each game's final score. They are stored as
+  user-supplied truth, separate from anything the pipeline predicts. This gives every match
+  a result and gives the **Game** boundaries that the "one game at a time" plan in Phase 3
+  needs.
+- match rating, 0-10 per player per match, always shown with the parts that add up to it
+  ("+0.8 from third-shot drops"):
+  - v0: a weighted mix of movement and positioning stats from Phase 6 (kitchen time,
+    arrival speed, coverage, spacing), plus a small bonus for winning.
+  - v1, after Phase 10: shots valued by how much they change the chance of winning the
+    rally (like xG/xT in football). A player's rating is the sum of their shots.
+  - Opponent strength is ignored, and the page says so.
+- Player of the match: the player with the highest match rating in a published match.
+  The number of these awards is the first long-term stat.
+- profiles: a user's match ratings over time.
+- group leaderboard: ranked by the average match rating over each player's last 10
+  published matches, with at least 3 matches to appear. Side boards cover Player of the
+  match awards and individual stats such as kitchen time.
+- mobile-friendly web app installable to the home screen (PWA). A native app waits
+  until the PWA demonstrably falls short.
+
+Rules carried over from the core project:
+
+- A match rating is published only once the events it uses are confident or corrected.
+  Until then it is "provisional" and kept off leaderboards.
+- Any tagged player can correct a shared match. Every correction is visible to the
+  group, with who made it and the original prediction.
+- Everything is visible only to the groups a match is shared into: the video, ratings and
+  profiles. A profile shows only matches from groups the viewer shares with that user.
+  Nothing is public.
+
+Not now:
+
+- a long-term skill rating (like DUPR). Friend groups don't play enough different
+  opponents for it. Revisit after the Player of the match count.
+- a public launch, a native app, hosted GPU processing.
 
 ---
 

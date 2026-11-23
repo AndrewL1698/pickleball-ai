@@ -1,0 +1,3 @@
+.env
+apps/web/.env.local
+weights/**
