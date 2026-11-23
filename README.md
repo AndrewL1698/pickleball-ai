@@ -112,6 +112,10 @@ docker compose up -d postgres redis
 uv run pytest -m integration
 ```
 
+CI (`.github/workflows/ci.yml`) runs all of the above, the integration tests
+against PostgreSQL and Redis service containers, and the web app's lint,
+typecheck, tests and build on every pull request and push to `main`.
+
 Pretrained detector weights are downloaded into `weights/` (gitignored) on first use.
 
 Ball tracking uses the released WASB tennis model, which is not downloaded
