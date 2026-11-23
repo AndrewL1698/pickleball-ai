@@ -20,6 +20,7 @@ Labeling helpers, which export sampled frames and a template to fill in:
 
     pbml label-players MANIFEST --window ID [--every-seconds S]
     pbml label-ball    MANIFEST --window ID [--every-frames N] [--export]
+    pbml label-ground-contact MANIFEST --window ID [--frames N]
 """
 
 import argparse
@@ -46,7 +47,11 @@ from pickleball_ml.experiment import (
     smoke_window,
     write_json,
 )
-from pickleball_ml.paths import DEFAULT_PROCESSED_ROOT, StageOutputs
+from pickleball_ml.paths import (
+    DEFAULT_PROCESSED_ROOT,
+    StageOutputs,
+    ground_contact_labels_path,
+)
 from pickleball_ml.players.identity import IdentityConfig, resolve_identities, run_record
 from pickleball_ml.players.tracking import TrackingConfig, track_people
 from pickleball_ml.render.topdown import render_topdown_video
@@ -150,6 +155,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", type=Path)
     p.add_argument("--annotator", default="")
     p.set_defaults(handler=cmd_label_ball)
+
+    p = commands.add_parser("label-ground-contact",
+                            help="click players' ground-contact points on sampled frames")
+    p.add_argument("manifest", type=Path)
+    p.add_argument("--window", required=True)
+    p.add_argument("--frames", type=int, default=10,
+                   help="number of processed frames to label, spread over the window")
+    p.add_argument("--annotator", default="")
+    p.set_defaults(handler=cmd_label_ground_contact)
 
     args = parser.parse_args(argv)
     if getattr(args, "video", None) is None:
@@ -463,6 +477,28 @@ def cmd_label_ball(args: argparse.Namespace, _outputs: object) -> int:
     output = args.out or (outputs.root / "ball_labels.json")
     count = label_ball_frames(video, frames, output, clip=window.clip, window=window.id,
                               split=window.split, annotator=args.annotator)
+    print(f"labeled {count}/{len(frames)} frames -> {output}")
+    return 0
+
+
+def cmd_label_ground_contact(args: argparse.Namespace, _outputs: object) -> int:
+    import pandas as pd
+
+    from pickleball_ml.evaluation.label_export import spread_frames
+    from pickleball_ml.players.click_tool import label_ground_contacts
+
+    experiment = load_experiment(args.manifest)
+    window = experiment.window(args.window)
+    outputs = experiment.outputs(window)
+    if not outputs.detections_raw.exists():
+        raise FileNotFoundError(f"run the track stage for {window.id} first")
+    processed = pd.read_parquet(outputs.detections_raw, columns=["frame_number"])
+    frames = spread_frames(sorted({int(f) for f in processed["frame_number"]}), args.frames)
+    output = ground_contact_labels_path(window.clip)
+    count = label_ground_contacts(
+        experiment.clips[window.clip].video, frames, output, clip=window.clip,
+        window=window.id, split=window.split, annotator=args.annotator,
+    )
     print(f"labeled {count}/{len(frames)} frames -> {output}")
     return 0
 

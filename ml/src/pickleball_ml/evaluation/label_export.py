@@ -50,6 +50,15 @@ def sample_frames(processed: list[int], every_frames: int) -> list[int]:
     return chosen
 
 
+def spread_frames(processed: list[int], count: int) -> list[int]:
+    """`count` processed frames spread evenly from the first to the last (all if fewer)."""
+    ordered = sorted(processed)
+    if count >= len(ordered):
+        return ordered
+    picks = np.linspace(0, len(ordered) - 1, count).round().astype(int)
+    return [ordered[i] for i in sorted(set(picks.tolist()))]
+
+
 def export_player_frames(
     video: Path, detections: pd.DataFrame, frames: list[int], out_dir: Path,
     clip: str, window: str, split: str, gated_only: bool = True,
