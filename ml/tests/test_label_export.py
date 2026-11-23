@@ -1,6 +1,6 @@
 import pytest
 
-from pickleball_ml.evaluation.label_export import sample_frames
+from pickleball_ml.evaluation.label_export import sample_frames, spread_frames
 
 
 def test_samples_every_nth_processed_frame() -> None:
@@ -19,3 +19,10 @@ def test_empty_and_invalid_inputs() -> None:
     assert sample_frames([], 5) == []
     with pytest.raises(ValueError, match="every_frames"):
         sample_frames([1, 2], 0)
+
+
+def test_spreads_a_fixed_number_of_frames_over_the_processed_ones() -> None:
+    processed = list(range(0, 100, 3))  # 34 frames, 0..99
+    assert spread_frames(processed, 4) == [0, 33, 66, 99]
+    assert spread_frames(processed[:2], 5) == [0, 3]
+    assert spread_frames([], 5) == []

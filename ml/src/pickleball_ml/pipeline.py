@@ -26,6 +26,7 @@ from pickleball_ml.experiment import (
     window_record,
     write_json,
 )
+from pickleball_ml.paths import ground_contact_labels_path
 
 Progress = Callable[..., None] | None
 
@@ -453,6 +454,9 @@ def _run_evaluate(
 ) -> StageResult:
     stage = "evaluate"
     labels = [p for p in (window.player_labels, window.ball_labels) if p is not None]
+    ground_contact = ground_contact_labels_path(window.clip)
+    if ground_contact.exists():
+        labels.append(ground_contact)
     if not labels:
         return runner.skip(stage, {"reason": "no label files"})
     mark = fingerprint([p.read_text() if p.exists() else "" for p in labels])
@@ -485,6 +489,24 @@ def _run_evaluate(
                 "annotator": header.get("annotator", ""),
                 "metrics": evaluate_ball(track, ball_labels),
             }
+        if ground_contact.exists():
+            from pickleball_ml.court.calibration import Calibration
+            from pickleball_ml.evaluation.ground_contact import (
+                evaluate_ground_contact,
+                load_ground_contact_labels,
+            )
+
+            header, contact_frames = load_ground_contact_labels(ground_contact)
+            in_window = [f for f in contact_frames if f.window == window.id]
+            if in_window:
+                report["ground_contact"] = {
+                    "labels": str(ground_contact),
+                    "annotator": header.get("annotator", ""),
+                    "metrics": evaluate_ground_contact(
+                        pd.read_parquet(outputs.players_court), in_window,
+                        Calibration.load(outputs.calibration).homography,
+                    ),
+                }
         write_json(path, report)
         summary: dict[str, Any] = {}
         if "players" in report:
@@ -495,6 +517,10 @@ def _run_evaluate(
         if "ball" in report:
             summary["ball_coverage"] = report["ball"]["metrics"]["all"]["coverage"]
             summary["ball_median_error_px"] = report["ball"]["metrics"]["all"]["median_error_px"]
+        if "ground_contact" in report:
+            everything = report["ground_contact"]["metrics"]["all"]
+            summary["ground_contact_median_error_ft"] = everything["median_error_ft"]
+            summary["ground_contact_median_error_px"] = everything["median_error_px"]
         return summary
 
     return runner.run(stage, work)

@@ -10,6 +10,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_PROCESSED_ROOT = Path("data/processed")
+DEFAULT_ANNOTATIONS_ROOT = Path("data/annotations")
+
+
+def ground_contact_labels_path(
+    clip_id: str, annotations_root: Path = DEFAULT_ANNOTATIONS_ROOT
+) -> Path:
+    """Hand-clicked ground-contact points for one clip, across all its windows."""
+    return annotations_root / clip_id / "ground_contact_labels.json"
 
 
 @dataclass(frozen=True)
