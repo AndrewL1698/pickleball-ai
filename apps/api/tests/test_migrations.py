@@ -14,6 +14,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.orm import Session
 from tests_support_api import (
     ALEMBIC_INI,
     MATCHES,
@@ -21,10 +22,11 @@ from tests_support_api import (
     assert_at_0004,
     assert_downgraded,
     assert_upgraded,
+    calibrated_match,
     seed_phase_1,
 )
 
-from pickleball_api.models import Base
+from pickleball_api.models import Base, Match, ModelRun, ModelRunStage
 
 pytestmark = pytest.mark.integration
 
@@ -89,5 +91,44 @@ def test_phase_1_rows_survive_the_match_migration_both_ways(fresh_database: str)
             assert_at_0004(connection, seeded)
             context = MigrationContext.configure(connection, opts={"compare_type": True})
             assert compare_metadata(context, Base.metadata) == []
+    finally:
+        engine.dispose()
+
+
+def _match_with_runs(session: Session, name: str) -> Match:
+    """A calibrated match showing an Identify run that read a Detect run."""
+    match, calibration = calibrated_match(session, name=name)
+    detect = ModelRun.start(
+        match, ModelRunStage.DETECT, calibration=calibration, model_version="v", config={}
+    )
+    match.current_identify_run = ModelRun.start(
+        match,
+        ModelRunStage.IDENTIFY,
+        calibration=calibration,
+        model_version="v",
+        config={},
+        parent=detect,
+    )
+    session.commit()
+    return match
+
+
+def test_deleting_a_match_cascades_to_its_runs_and_calibrations(fresh_database: str) -> None:
+    """The match, its runs and its calibrations point at one another, and a run's
+    references to its parent and its calibration do not cascade. PostgreSQL has
+    to resolve all of that in one statement, and through the ORM."""
+    command.upgrade(alembic_config(fresh_database), "head")
+    engine = create_engine(fresh_database)
+    try:
+        with Session(engine) as session:
+            session.delete(_match_with_runs(session, "deleted through the ORM"))
+            session.commit()
+            _match_with_runs(session, "deleted in SQL")
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM matches"))
+        with engine.connect() as connection:
+            for table in ("model_runs", "court_calibrations", "reference_frames"):
+                remaining = connection.execute(text(f"SELECT count(*) FROM {table}")).scalar()
+                assert remaining == 0, table
     finally:
         engine.dispose()
