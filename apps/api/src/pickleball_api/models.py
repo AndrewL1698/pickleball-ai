@@ -1,9 +1,10 @@
 """Database tables for matches, their uploaded video, and the jobs that analyze them.
 
 `docs/DATA_MODEL.md` describes the eventual schema. A `Match` is the parent of
-everything recorded about one game of pickleball: today its `Video` (the stored
-file, one per match for the MVP) and its `AnalysisJob`s (each an attempt at
-processing it); later its calibration, players and rallies. Ownership points
+everything recorded about one uploaded video of doubles play, which may hold
+several games (`GLOSSARY.md`): its `Video` (the stored file, one per match for
+the MVP), its `AnalysisJob`s (each an attempt at processing it), its calibration
+and its `ModelRun`s; later its players and rallies. Ownership points
 Match -> Video rather than the other way round, so those later tables have a
 stable parent that does not change if a match ever gains a second video.
 
@@ -13,9 +14,12 @@ whole table.
 """
 
 import enum
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -33,7 +37,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
 
 
 class Base(DeclarativeBase):
@@ -130,6 +134,17 @@ class CalibrationSource(enum.StrEnum):
     MANUAL = "manual"
 
 
+class ModelRunStage(enum.StrEnum):
+    """Which half of player tracking a run is (ADR 0001)."""
+
+    #: Person detection, court gate and ByteTrack over the video. Slow, and
+    #: writes image-space ground-contact points only.
+    DETECT = "detect"
+    #: Player selection, partners, changeovers and court coordinates, read
+    #: from one Detect run. Takes seconds, so every correction re-runs it.
+    IDENTIFY = "identify"
+
+
 class JobStage(enum.StrEnum):
     """Pipeline stage a job has reached.
 
@@ -169,7 +184,10 @@ def _enum_column(enum_class: type[enum.StrEnum], name: str) -> Enum:
 
 
 class Match(Base):
-    """One recorded game, and the owner of everything derived from it."""
+    """One uploaded video of doubles play, and the owner of everything derived from it.
+
+    A match is the whole upload, so it can hold several games.
+    """
 
     __tablename__ = "matches"
 
@@ -182,6 +200,18 @@ class Match(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, server_default=func.now(), index=True
+    )
+    #: The Identify run whose player tracks the match is showing. Every run is
+    #: kept, so pointing here at a newer one replaces nothing.
+    current_identify_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "model_runs.id",
+            name="fk_matches_current_identify_run_id_model_runs",
+            # `model_runs` also points at `matches`; the cycle means one of the
+            # two constraints has to be added after both tables exist.
+            use_alter=True,
+        ),
+        default=None,
     )
 
     video: Mapped["Video | None"] = relationship(
@@ -203,6 +233,32 @@ class Match(Base):
         cascade="all, delete-orphan",
         order_by="CourtCalibration.created_at, CourtCalibration.id",
     )
+
+    runs: Mapped[list["ModelRun"]] = relationship(
+        back_populates="match",
+        cascade="all, delete-orphan",
+        foreign_keys="ModelRun.match_id",
+        order_by="ModelRun.started_at, ModelRun.id",
+    )
+    current_identify_run: Mapped["ModelRun | None"] = relationship(
+        foreign_keys=[current_identify_run_id],
+        # Written after the run row exists, and cleared before it is deleted,
+        # which is how the ORM gets through the cycle with `model_runs`.
+        post_update=True,
+    )
+
+    @validates("current_identify_run")
+    def _check_shown_run(self, _key: str, run: "ModelRun | None") -> "ModelRun | None":
+        """Only an Identify run of this match. The foreign key proves no more than
+        that the run exists, and a match pointing at another match's run would
+        stop that match from ever being deleted."""
+        if run is None:
+            return None
+        if run.stage is not ModelRunStage.IDENTIFY:
+            raise ValueError(f"a match shows an Identify run, not a {run.stage.value} run")
+        if run.match is not self:
+            raise ValueError("a match shows only its own runs")
+        return run
 
     @property
     def latest_calibration(self) -> "CourtCalibration | None":
@@ -479,6 +535,10 @@ class CourtCalibration(Base):
     )
 
     match: Mapped[Match] = relationship(back_populates="calibrations")
+    #: Declared so the ORM orders writes by it: a frame is inserted before its
+    #: calibrations, and a calibration (with the runs that used it) is deleted
+    #: before its frame, whose own deletion would otherwise be refused.
+    reference_frame: Mapped[ReferenceFrame] = relationship()
 
     __table_args__ = (
         CheckConstraint(
@@ -489,6 +549,119 @@ class CourtCalibration(Base):
         ),
         Index("ix_court_calibrations_match_id_created_at", "match_id", "created_at"),
     )
+
+
+def hash_config(config: dict[str, Any], calibration_id: uuid.UUID) -> str:
+    """The SHA-256 of a run's configuration together with the calibration it uses.
+
+    The same whatever order the configuration's keys are in. Two runs with the
+    same hash and model version were asked to do the same thing, which is how a
+    later stage can tell whether a run can be reused. The calibration is part of
+    the hash, so a run made under an old calibration never looks reusable after
+    a recalibration. It is hashed from the `calibration_id` column, not copied
+    into `config_json`, so it is stored in one place only.
+    """
+    payload = {"calibration_id": calibration_id.hex, "config": config}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+class ModelRun(Base):
+    """One run of a model over a match, recorded so every prediction can be traced.
+
+    Never updated after it completes and never deleted while its match exists:
+    a recalibration or a correction is a new Identify run, and the original
+    prediction survives it. The run's output is a Parquet artifact in `Storage`
+    (see `pickleball_api.run_artifacts`), not rows in the database.
+    """
+
+    __tablename__ = "model_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    match_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("matches.id", ondelete="CASCADE", name="fk_model_runs_match_id_matches")
+    )
+    stage: Mapped[ModelRunStage] = mapped_column(_enum_column(ModelRunStage, "model_run_stage"))
+    model_version: Mapped[str] = mapped_column(String(128))
+    config_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    #: `hash_config(config_json, calibration_id)`, as hex.
+    config_hash: Mapped[str] = mapped_column(String(64))
+    #: The calibration the run used: Detect gates people with it before
+    #: ByteTrack, and Identify projects into court feet with it (ADR 0001).
+    #: Not cascaded, so a calibration a run used cannot be deleted on its own.
+    calibration_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("court_calibrations.id", name="fk_model_runs_calibration_id_court_calibrations")
+    )
+    #: Null until the run has written its artifact.
+    artifact_storage_key: Mapped[str | None] = mapped_column(String(512), unique=True, default=None)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    #: Null while the run is in progress, or if it never finished.
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    #: The run whose output this one read: an Identify run's Detect run.
+    parent_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("model_runs.id", name="fk_model_runs_parent_run_id_model_runs"),
+        default=None,
+    )
+
+    match: Mapped[Match] = relationship(back_populates="runs", foreign_keys=[match_id])
+    parent_run: Mapped["ModelRun | None"] = relationship(remote_side=[id])
+    calibration: Mapped[CourtCalibration] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "(stage = 'detect' AND parent_run_id IS NULL)"
+            " OR (stage = 'identify' AND parent_run_id IS NOT NULL)",
+            name="ck_model_runs_parent_matches_stage",
+        ),
+        CheckConstraint(
+            "completed_at IS NULL OR completed_at >= started_at",
+            name="ck_model_runs_completed_after_started",
+        ),
+        Index("ix_model_runs_match_id_started_at", "match_id", "started_at"),
+    )
+
+    @classmethod
+    def start(
+        cls,
+        match: Match,
+        stage: ModelRunStage,
+        *,
+        calibration: CourtCalibration,
+        model_version: str,
+        config: dict[str, Any],
+        parent: "ModelRun | None" = None,
+    ) -> "ModelRun":
+        """A new, unfinished run of `match`, with its configuration hashed.
+
+        Both stages use a calibration of the same match, which must already be
+        saved, because its id is hashed. An Identify run reads a Detect run of
+        the same match, and a Detect run reads only the video. Anything else is
+        refused here rather than left for the database to half-catch.
+        """
+        if calibration.match is not match:
+            raise ValueError("a run uses a calibration of its own match")
+        if calibration.id is None:
+            raise ValueError("a run uses a saved calibration")
+        if stage is ModelRunStage.IDENTIFY:
+            if parent is None or parent.stage is not ModelRunStage.DETECT:
+                raise ValueError("an Identify run reads a Detect run")
+            if parent.match is not match:
+                raise ValueError("an Identify run reads a Detect run of its own match")
+        elif parent is not None:
+            raise ValueError(f"a {stage.value} run reads no other run")
+        run = cls(
+            stage=stage,
+            model_version=model_version,
+            config_json=config,
+            config_hash=hash_config(config, calibration.id),
+            calibration=calibration,
+            parent_run=parent,
+            started_at=utcnow(),
+        )
+        # Through the collection rather than `run.match`: only this side
+        # cascades the new run into the session of a match that is already in one.
+        match.runs.append(run)
+        return run
 
 
 class AnalysisJob(Base):

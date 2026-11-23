@@ -2,8 +2,9 @@
 
 The FastAPI service, the database, the storage layer and the job worker added in
 Phase 1, re-parented under `Match` in Phase 2 checkpoint 1, given real video
-metadata extraction in checkpoint 2, and calibration images and court calibrations
-in checkpoints 3 and 4. The architecture
+metadata extraction in checkpoint 2, calibration images and court calibrations
+in checkpoints 3 and 4, and model runs with their stored artifacts in Phase 3.
+The architecture
 this is heading towards is in `ARCHITECTURE.md`, and the eventual schema is in
 `DATA_MODEL.md`.
 
@@ -34,7 +35,7 @@ apps/api/                              # package `pickleball_api`
 ├── Dockerfile                         # shared by the api and worker compose services
 ├── migrations/
 │   ├── env.py                         # reads the URL from settings unless given one
-│   └── versions/                      # 0001 tables, 0002 CHECKs, 0003 matches, 0004 metadata, 0005 stills, 0006 calibrations, 0007 camera check
+│   └── versions/                      # 0001 tables, 0002 CHECKs, 0003 matches, 0004 metadata, 0005 stills, 0006 calibrations, 0007 camera check, 0008 model runs
 ├── src/pickleball_api/
 │   ├── calibration.py                 # fits landmarks through pickleball_ml, or refuses them
 │   ├── config.py                      # typed settings, and the extension allowlist
@@ -43,8 +44,9 @@ apps/api/                              # package `pickleball_api`
 │   ├── errors.py                      # job error codes and their user-safe messages
 │   ├── jobs.py                        # the job state machine, match status sync, read queries
 │   ├── main.py                        # create_app(): middleware, routers, error handlers
-│   ├── models.py                      # Match, Video, AnalysisJob, ReferenceFrame, CourtCalibration
+│   ├── models.py                      # Match, Video, AnalysisJob, ReferenceFrame, CourtCalibration, ModelRun
 │   ├── queue.py                       # JobQueue interface, RQ and recording implementations
+│   ├── run_artifacts.py               # a model run's Parquet artifact, written and read through Storage
 │   ├── schemas.py                     # Pydantic response models
 │   ├── limits.py                      # refuses an oversized body before it is read
 │   ├── storage.py                     # Storage interface, local filesystem implementation
@@ -199,7 +201,7 @@ has no room, `503` when the job cannot be queued.
 
 ## Data Model
 
-Five tables. `matches` is the parent:
+Six tables. `matches` is the parent:
 
 | Column | Notes |
 |---|---|
@@ -208,6 +210,7 @@ Five tables. `matches` is the parent:
 | `recorded_at` | When the game was played. Nullable, and nothing sets it yet |
 | `status` | `uploaded`, `processing`, `calibration_required`, `court_ready`, `failed` |
 | `created_at` | `timestamptz`, set in Python |
+| `current_identify_run_id` | FK to `model_runs`, nullable. The Identify run whose player tracks the match shows |
 
 `videos`, one per match:
 
@@ -247,6 +250,32 @@ CASCADE`), `source` (`manual`), `image_points`, `court_points`, `homography`,
 `reprojection_error_ft` (each JSON), `mean_reprojection_error_ft`,
 `max_reprojection_error_ft`, `created_at`. Indexed on `(match_id, created_at)`. Rows
 are only added: the newest is in force, so a recalibration destroys nothing.
+
+`model_runs`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `stage` (`detect` or
+`identify`), `model_version`, `config_json`, `config_hash` (SHA-256 of the config,
+with sorted keys, together with `calibration_id`, from `models.hash_config`),
+`calibration_id` (FK to `court_calibrations`, `NOT NULL`, not cascaded),
+`artifact_storage_key` (nullable until the artifact is written; unique, never
+returned), `started_at`, `completed_at` (null while running), `parent_run_id` (FK to
+`model_runs`). Both stages need a calibration (ADR 0001): Detect uses it to gate
+people before ByteTrack, and Identify uses it to project into court feet. The
+calibration is stored only in its column. Hashing it keeps a run made under an old
+calibration from looking reusable after a recalibration. A CHECK requires an `identify`
+run to have a parent and a `detect` run to have none, and another requires
+`completed_at >= started_at`. Indexed on `(match_id, started_at)`. Make runs with
+`ModelRun.start`, which takes a saved calibration of the same match and refuses an
+Identify run whose parent is not a Detect run of the same match. `Match.current_identify_run` accepts only an Identify run of
+that match. Runs are only added. Neither foreign key into `model_runs` cascades, so a run
+that a match shows or another run read cannot be deleted on its own. Nor can a
+calibration that a run used, or the reference frame under it. Deleting the match
+removes all of them.
+
+`CourtCalibration.reference_frame` exists so the ORM orders its writes. Without it,
+deleting a match through the ORM could delete a frame before the calibration and run
+that depend on it.
+
+`matches.current_identify_run_id` and `model_runs.match_id` point at each other. The
+ORM gets through that cycle with `post_update` on `Match.current_identify_run`.
 
 `status` and `stage` are stored as `VARCHAR` plus a CHECK constraint (added in
 migration `0002`) rather than native PostgreSQL enums, so that adding a member
@@ -400,6 +429,18 @@ symlink is not followed and an existing object is not clobbered) and are renamed
 into place only once the whole stream has arrived. The directory is `0700` and
 files are `0600`.
 
+### Run artifacts
+
+A model run's output is one Parquet file, written and read with
+`pickleball_api.run_artifacts`. `write_run_artifact(storage, run, frame)` stores the
+DataFrame (without its index) under a fresh random `.parquet` key and sets
+`run.artifact_storage_key`. The caller commits, using `discard_on_error` if that
+commit can fail. A run that already has an artifact is refused with
+`ArtifactAlreadyWritten`, because runs are never overwritten. Both errors derive from
+`RunArtifactError`, not `StorageError`, because they are about the run, not the store. `read_run_artifact`
+reads it back through `local_path`. It raises `NoArtifact` for a run that never wrote
+one, and `ObjectNotFound` if the file is gone.
+
 ## The Worker
 
 `pbworker` runs an RQ worker against the configured queue. The task takes a job
@@ -510,8 +551,8 @@ uv run alembic -c apps/api/alembic.ini revision --autogenerate -m "what changed"
 ```
 
 Alembic does not autogenerate CHECK constraints, so a change to `JobStatus`,
-`JobStage`, `MatchStatus`, `ReferenceFrameKind` or `CalibrationSource` needs its
-migration written by hand; `0002` is the pattern.
+`JobStage`, `MatchStatus`, `ReferenceFrameKind`, `CalibrationSource` or
+`ModelRunStage` needs its migration written by hand; `0002` is the pattern.
 
 ### Migration 0003: introducing `matches`
 
@@ -567,6 +608,15 @@ them.
 Adds nullable `videos.camera_jumps` and enqueues nothing, so every existing video stays
 null, meaning not checked, unless it is uploaded again. Reference-frame jobs only run for
 a match with no images, so they will not fill it in. Downgrading forgets the results.
+
+### Migration 0008: model runs
+
+Adds `model_runs`, with a required `calibration_id`, and nullable
+`matches.current_identify_run_id`, and enqueues nothing. Every existing match shows no run. On SQLite the new column and its foreign
+key are added with one plain `ALTER TABLE ... ADD COLUMN`, not batch mode, because
+rebuilding `matches` with foreign keys on would cascade-delete everything the match
+owns. `test_migration_0008.py` checks that nothing is lost. Downgrading forgets every
+run, and the artifacts stay in storage until something removes them.
 
 ## Dependencies and Processes
 

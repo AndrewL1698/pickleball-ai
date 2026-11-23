@@ -13,7 +13,9 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import sqlalchemy as sa
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
+from pickleball_api.models import CourtCalibration, Match, ReferenceFrame, ReferenceFrameKind
 from pickleball_api.testing import ALEMBIC_INI, FTYP_HEADER, video_bytes
 
 __all__ = [
@@ -25,10 +27,52 @@ __all__ = [
     "assert_at_0004",
     "assert_downgraded",
     "assert_upgraded",
+    "calibrated_match",
+    "recalibrate",
     "seed_phase_1",
     "upload",
     "video_bytes",
 ]
+
+
+def recalibrate(session: Session, match: Match) -> CourtCalibration:
+    """A new calibration of `match`, on a background frame made if missing.
+
+    Flushed, so it has the id a run hashes.
+    """
+    session.add(match)
+    if not match.reference_frames:
+        match.reference_frames.append(
+            ReferenceFrame(
+                ordinal=0,
+                kind=ReferenceFrameKind.BACKGROUND,
+                source_frame_count=25,
+                storage_key=f"{uuid.uuid4().hex}.jpg",
+                width=1920,
+                height=1080,
+                byte_size=10,
+            )
+        )
+    calibration = CourtCalibration(
+        reference_frame=match.reference_frames[0],
+        image_points={},
+        court_points={},
+        homography=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        reprojection_error_ft={},
+        mean_reprojection_error_ft=0.1,
+        max_reprojection_error_ft=0.2,
+    )
+    match.calibrations.append(calibration)
+    session.flush()
+    return calibration
+
+
+def calibrated_match(
+    session: Session, name: str = "Saturday doubles"
+) -> tuple[Match, CourtCalibration]:
+    """A match with one calibration, flushed into `session`."""
+    match = Match(name=name)
+    return match, recalibrate(session, match)
 
 
 def upload(

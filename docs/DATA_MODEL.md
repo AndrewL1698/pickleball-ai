@@ -2,7 +2,7 @@
 
 This document gives a conceptual schema. Exact implementation may evolve.
 
-Implementation status (Phase 2 checkpoint 5): five of these tables exist.
+Implementation status (Phase 3): six of these tables exist.
 
 | Here | In the database today |
 |---|---|
@@ -11,6 +11,7 @@ Implementation status (Phase 2 checkpoint 5): five of these tables exist.
 | `ProcessingJob` | `analysis_jobs`, owned by `match_id`, plus an `error_code` column |
 | `ReferenceFrame` | `reference_frames` |
 | `CourtCalibration` | `court_calibrations`, without `confidence` until a model can produce one |
+| `ModelRun` | `model_runs`, for the player-tracking stages `detect` and `identify` (Phase 3) |
 
 Ownership points Match -> VideoAsset and Match -> ProcessingJob, so every later
 table (`CourtCalibration`, `Player`, `Rally`, ...) has the same stable parent.
@@ -40,8 +41,11 @@ user_id              # not yet: no User table exists
 name                 # defaults to the upload's filename without its extension
 recorded_at          # when the game was played, if known; not the upload time
 status               # uploaded / processing / calibration_required / court_ready / failed
+current_identify_run_id # nullable; the Identify ModelRun whose player tracks are shown
 created_at
 ```
+
+A match is one whole upload, so it can contain several games (`GLOSSARY.md`).
 
 `Match.status` is the user-facing summary. Per-stage pipeline progress lives in `ProcessingJob`.
 
@@ -319,16 +323,31 @@ This enables the UI to show the exact footage supporting an insight.
 ```text
 id
 match_id
-stage
-model_name
-model_version
+stage                # detect / identify for now; later stages add members
+model_version        # names the model as well as its version
 config_json
-artifact_storage_key # nullable; Parquet/overlay outputs for this run
+config_hash          # SHA-256 of config_json (sorted keys) together with calibration_id
+calibration_id       # the CourtCalibration the run used; required for both stages
+artifact_storage_key # nullable until written; the run's Parquet output
 started_at
-completed_at
+completed_at         # null while running, or if the run never finished
+parent_run_id        # nullable; the run this one read (Identify -> its Detect run)
 ```
 
 Every prediction (SQL row or Parquet artifact) should reference a model run.
+
+Player tracking is two runs (see
+[ADR 0001](adr/0001-image-coordinates-are-the-source-of-truth-for-player-tracks.md)).
+A `detect` run reads the video and writes image-space detections. An `identify` run
+reads one `detect` run of the same match and writes court-coordinate player tracks.
+A recalibration or a correction makes a new `identify` run and never a new `detect`
+run. Both stages use a calibration: Detect gates people with it before ByteTrack,
+and Identify projects into court feet with it. Because `calibration_id` is part of
+`config_hash`, a run made under an old calibration never looks reusable after a
+recalibration. Runs are never updated once complete and never deleted, so the original
+prediction survives every correction, and a calibration a run used cannot be deleted
+on its own. `Match.current_identify_run_id` says which
+run the match is showing.
 
 ## Key Design Rule
 

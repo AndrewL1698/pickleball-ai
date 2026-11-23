@@ -374,7 +374,7 @@ Clicking a player's location in the video produces the correct approximate locat
 
 ## Phase 3 - Player Tracking
 
-Status (2026-11-22): in progress. Design settled; nothing built yet.
+Status (2026-11-22): in progress. Design settled. Built so far: the `ModelRun` table and run artifact storage (#7).
 
 Harden the Phase 0 prototype and move it into the worker. Selection, ID-switch recovery,
 partner assignment, linking across changeovers and the confidence margins already exist
