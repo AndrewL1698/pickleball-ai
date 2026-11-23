@@ -1,5 +1,13 @@
-# The checks that need no database, Redis, GPU or video. Integration tests and
-# the live web suite need a running stack, so they stay a local step.
+# Every pull request and every push to main runs three jobs:
+#
+#   python       lint, types and the hermetic unit tests: no database, Redis,
+#                GPU, weights or video.
+#   integration  the `-m integration` tests, against PostgreSQL and Redis
+#                service containers that mirror docker-compose.yml.
+#   web          lint, types, unit tests and a production build of apps/web.
+#
+# Still a local step: `npm run check:contract` and `npm run test:live`, which
+# need the API itself running.
 name: CI
 
 on:
@@ -10,18 +18,78 @@ on:
 permissions:
   contents: read
 
+# A new push to a PR branch makes the run for the previous commit moot.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      # setup-uv publishes no moving major tag (v10), only full versions;
+      # dependabot keeps this one current.
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           enable-cache: true
-      - run: uv sync --frozen
-      - run: uv run --frozen ruff check .
-      - run: uv run --frozen mypy
-      - run: uv run --frozen pytest
+          # Prune to what uv built locally before saving. On Linux the lock
+          # resolves torch to the CUDA build, ~3 GB of wheels that PyPI serves
+          # faster than a cache restore would, and that would otherwise crowd
+          # every other cache out of the repository's 10 GB allowance.
+          prune-cache: true
+      # --locked: fail if uv.lock is out of date with pyproject.toml, rather
+      # than quietly installing something other than what is committed.
+      - run: uv sync --locked
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync mypy
+      # addopts in pyproject.toml already deselects `integration`.
+      - run: uv run --no-sync pytest
+
+  integration:
+    runs-on: ubuntu-latest
+    # Same images, credentials and host ports as docker-compose.yml, so the
+    # URLs below are the ones in .env.example.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: pickleball
+          POSTGRES_PASSWORD: pickleball
+          POSTGRES_DB: pickleball
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U pickleball -d pickleball"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        # Service containers cannot override the command, so this runs with
+        # Redis's default persistence; for a throwaway container that is moot.
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      PICKLEBALL_ENVIRONMENT: test
+      PICKLEBALL_DATABASE_URL: postgresql+psycopg://pickleball:pickleball@localhost:5433/pickleball
+      PICKLEBALL_REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          enable-cache: true
+          prune-cache: true
+      - run: uv sync --locked
+      - run: uv run --no-sync alembic -c apps/api/alembic.ini upgrade head
+      # -rs lists every skip, so a test that skipped for want of PostgreSQL
+      # shows up in the log instead of passing silently.
+      - run: uv run --no-sync pytest -m integration -rs
 
   web:
     runs-on: ubuntu-latest
@@ -29,8 +97,8 @@ jobs:
       run:
         working-directory: apps/web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -41,3 +109,4 @@ jobs:
       - run: npx next typegen
       - run: npm run typecheck
       - run: npm test
+      - run: npm run build

@@ -1,0 +1,14 @@
+# Keeps the action versions in .github/workflows current. Python and npm
+# dependencies are pinned by uv.lock and package-lock.json and updated by hand.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # One PR for all the action bumps in a week, not one per action.
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
