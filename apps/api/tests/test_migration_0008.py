@@ -19,6 +19,8 @@ MATCH = "00000000000000000000000000000001"
 OTHER_MATCH = "00000000000000000000000000000002"
 DETECT = "0000000000000000000000000000000d"
 IDENTIFY = "0000000000000000000000000000000e"
+#: A match's frame and calibration ids are its own with the first digit swapped.
+CALIBRATION = "c" + MATCH[1:]
 
 
 @pytest.fixture
@@ -46,12 +48,31 @@ def migrate(connection: Connection, direction: str, revision: str) -> None:
 
 
 def insert_match(connection: Connection, identifier: str = MATCH) -> None:
+    """A calibrated match: the match, its background frame, and one calibration."""
     connection.execute(
         text(
             "INSERT INTO matches (id, name, status, created_at)"
             " VALUES (:id, 'match', 'court_ready', CURRENT_TIMESTAMP)"
         ),
         {"id": identifier},
+    )
+    frame = "f" + identifier[1:]
+    connection.execute(
+        text(
+            "INSERT INTO reference_frames (id, match_id, ordinal, kind, source_frame_count,"
+            " storage_key, width, height, byte_size)"
+            " VALUES (:id, :match, 0, 'background', 25, :key, 1920, 1080, 10)"
+        ),
+        {"id": frame, "match": identifier, "key": f"{frame}.jpg"},
+    )
+    connection.execute(
+        text(
+            "INSERT INTO court_calibrations (id, match_id, reference_frame_id, source,"
+            " image_points, court_points, homography, reprojection_error_ft,"
+            " mean_reprojection_error_ft, max_reprojection_error_ft)"
+            " VALUES (:id, :match, :frame, 'manual', '{}', '{}', '[]', '{}', 0.1, 0.2)"
+        ),
+        {"id": "c" + identifier[1:], "match": identifier, "frame": frame},
     )
 
 
@@ -72,15 +93,17 @@ def insert_run(
     identifier: str = DETECT,
     stage: str = "detect",
     parent: str | None = None,
+    calibration: str | None = CALIBRATION,
     started_at: str = "2026-11-22 10:00:00",
     completed_at: str | None = "2026-11-22 11:00:00",
 ) -> None:
     connection.execute(
         text(
             "INSERT INTO model_runs (id, match_id, stage, model_version, config_json,"
-            " config_hash, artifact_storage_key, started_at, completed_at, parent_run_id)"
+            " config_hash, artifact_storage_key, started_at, completed_at, parent_run_id,"
+            " calibration_id)"
             " VALUES (:id, :match, :stage, 'yolo11m', '{}', 'abc', :key, :started, :completed,"
-            " :parent)"
+            " :parent, :calibration)"
         ),
         {
             "id": identifier,
@@ -90,6 +113,7 @@ def insert_run(
             "started": started_at,
             "completed": completed_at,
             "parent": parent,
+            "calibration": calibration,
         },
     )
 
@@ -147,6 +171,22 @@ def test_deleting_a_match_deletes_its_runs(connection: Connection) -> None:
 
     connection.execute(text("DELETE FROM matches"))
     assert count(connection, "model_runs") == 0
+    assert count(connection, "court_calibrations") == 0
+    assert count(connection, "reference_frames") == 0
+
+
+def test_a_calibration_a_run_used_cannot_be_deleted_on_its_own(connection: Connection) -> None:
+    """ADR 0001: a run has to be able to say which calibration it used."""
+    migrate(connection, "upgrade", "head")
+    insert_match(connection)
+    insert_run(connection)
+    with pytest.raises(IntegrityError):
+        connection.execute(
+            text("DELETE FROM court_calibrations WHERE id = :id"), {"id": CALIBRATION}
+        )
+    # Nor through its frame, whose deletion would cascade to the calibration.
+    with pytest.raises(IntegrityError):
+        connection.execute(text("DELETE FROM reference_frames"))
 
 
 def test_a_run_survives_the_deletion_of_another_match(connection: Connection) -> None:
@@ -190,6 +230,9 @@ def test_a_match_cannot_show_a_run_that_does_not_exist(connection: Connection) -
         {"stage": "identify", "parent": None},
         {"parent": "0000000000000000000000000000000f", "stage": "identify"},
         {"started_at": "2026-11-22 12:00:00", "completed_at": "2026-11-22 11:00:00"},
+        # Both stages use a calibration: Detect to gate, Identify to project.
+        {"calibration": None},
+        {"calibration": "c000000000000000000000000000000f"},
     ],
 )
 def test_an_impossible_run_is_refused_by_the_database(
@@ -223,6 +266,7 @@ def test_a_downgrade_forgets_the_runs_and_keeps_the_match(connection: Connection
     assert "current_identify_run_id" not in columns
     assert count(connection, "matches") == 1
     assert count(connection, "videos") == 1
+    assert count(connection, "court_calibrations") == 1
 
     migrate(connection, "upgrade", "head")
     assert count(connection, "matches") == 1

@@ -535,6 +535,10 @@ class CourtCalibration(Base):
     )
 
     match: Mapped[Match] = relationship(back_populates="calibrations")
+    #: Declared so the ORM orders writes by it: a frame is inserted before its
+    #: calibrations, and a calibration (with the runs that used it) is deleted
+    #: before its frame, whose own deletion would otherwise be refused.
+    reference_frame: Mapped[ReferenceFrame] = relationship()
 
     __table_args__ = (
         CheckConstraint(
@@ -547,13 +551,18 @@ class CourtCalibration(Base):
     )
 
 
-def hash_config(config: dict[str, Any]) -> str:
-    """A run configuration's SHA-256, the same whatever order its keys are in.
+def hash_config(config: dict[str, Any], calibration_id: uuid.UUID) -> str:
+    """The SHA-256 of a run's configuration together with the calibration it uses.
 
-    Two runs with the same hash and model version were asked to do the same
-    thing, which is how a later stage can tell whether a run can be reused.
+    The same whatever order the configuration's keys are in. Two runs with the
+    same hash and model version were asked to do the same thing, which is how a
+    later stage can tell whether a run can be reused. The calibration is part of
+    the hash, so a run made under an old calibration never looks reusable after
+    a recalibration. It is hashed from the `calibration_id` column, not copied
+    into `config_json`, so it is stored in one place only.
     """
-    canonical = json.dumps(config, sort_keys=True, separators=(",", ":"))
+    payload = {"calibration_id": calibration_id.hex, "config": config}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
@@ -575,8 +584,14 @@ class ModelRun(Base):
     stage: Mapped[ModelRunStage] = mapped_column(_enum_column(ModelRunStage, "model_run_stage"))
     model_version: Mapped[str] = mapped_column(String(128))
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON)
-    #: `hash_config(config_json)`, as hex.
+    #: `hash_config(config_json, calibration_id)`, as hex.
     config_hash: Mapped[str] = mapped_column(String(64))
+    #: The calibration the run used: Detect gates people with it before
+    #: ByteTrack, and Identify projects into court feet with it (ADR 0001).
+    #: Not cascaded, so a calibration a run used cannot be deleted on its own.
+    calibration_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("court_calibrations.id", name="fk_model_runs_calibration_id_court_calibrations")
+    )
     #: Null until the run has written its artifact.
     artifact_storage_key: Mapped[str | None] = mapped_column(String(512), unique=True, default=None)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -590,6 +605,7 @@ class ModelRun(Base):
 
     match: Mapped[Match] = relationship(back_populates="runs", foreign_keys=[match_id])
     parent_run: Mapped["ModelRun | None"] = relationship(remote_side=[id])
+    calibration: Mapped[CourtCalibration] = relationship()
 
     __table_args__ = (
         CheckConstraint(
@@ -610,16 +626,22 @@ class ModelRun(Base):
         match: Match,
         stage: ModelRunStage,
         *,
+        calibration: CourtCalibration,
         model_version: str,
         config: dict[str, Any],
         parent: "ModelRun | None" = None,
     ) -> "ModelRun":
         """A new, unfinished run of `match`, with its configuration hashed.
 
-        An Identify run reads a Detect run of the same match, and a Detect run
-        reads only the video; anything else is refused here rather than left
-        for the database to half-catch.
+        Both stages use a calibration of the same match, which must already be
+        saved, because its id is hashed. An Identify run reads a Detect run of
+        the same match, and a Detect run reads only the video. Anything else is
+        refused here rather than left for the database to half-catch.
         """
+        if calibration.match is not match:
+            raise ValueError("a run uses a calibration of its own match")
+        if calibration.id is None:
+            raise ValueError("a run uses a saved calibration")
         if stage is ModelRunStage.IDENTIFY:
             if parent is None or parent.stage is not ModelRunStage.DETECT:
                 raise ValueError("an Identify run reads a Detect run")
@@ -627,15 +649,19 @@ class ModelRun(Base):
                 raise ValueError("an Identify run reads a Detect run of its own match")
         elif parent is not None:
             raise ValueError(f"a {stage.value} run reads no other run")
-        return cls(
-            match=match,
+        run = cls(
             stage=stage,
             model_version=model_version,
             config_json=config,
-            config_hash=hash_config(config),
+            config_hash=hash_config(config, calibration.id),
+            calibration=calibration,
             parent_run=parent,
             started_at=utcnow(),
         )
+        # Through the collection rather than `run.match`: only this side
+        # cascades the new run into the session of a match that is already in one.
+        match.runs.append(run)
+        return run
 
 
 class AnalysisJob(Base):

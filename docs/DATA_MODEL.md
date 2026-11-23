@@ -325,8 +325,9 @@ id
 match_id
 stage                # detect / identify for now; later stages add members
 model_version        # names the model as well as its version
-config_json          # includes calibration_id: the calibration the run used (ADR 0001)
-config_hash          # SHA-256 of config_json with sorted keys
+config_json
+config_hash          # SHA-256 of config_json (sorted keys) together with calibration_id
+calibration_id       # the CourtCalibration the run used; required for both stages
 artifact_storage_key # nullable until written; the run's Parquet output
 started_at
 completed_at         # null while running, or if the run never finished
@@ -340,8 +341,12 @@ Player tracking is two runs (see
 A `detect` run reads the video and writes image-space detections. An `identify` run
 reads one `detect` run of the same match and writes court-coordinate player tracks.
 A recalibration or a correction makes a new `identify` run and never a new `detect`
-run. Runs are never updated once complete and never deleted, so the original
-prediction survives every correction. `Match.current_identify_run_id` says which
+run. Both stages use a calibration: Detect gates people with it before ByteTrack,
+and Identify projects into court feet with it. Because `calibration_id` is part of
+`config_hash`, a run made under an old calibration never looks reusable after a
+recalibration. Runs are never updated once complete and never deleted, so the original
+prediction survives every correction, and a calibration a run used cannot be deleted
+on its own. `Match.current_identify_run_id` says which
 run the match is showing.
 
 ## Key Design Rule

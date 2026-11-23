@@ -1,10 +1,11 @@
 """Model runs, and the Identify run each match is showing.
 
 A run is one Detect or Identify pass over a match (ADR 0001). Its output is a
-Parquet artifact in storage, and the row says which model and configuration made
-it. Runs are only ever added. `matches.current_identify_run_id` is the run the
-match shows, and it starts null for every existing match: nothing has been
-tracked yet, and a migration must not start work.
+Parquet artifact in storage, and the row says which model, configuration and
+court calibration made it. Runs are only ever added. `matches.current_identify_run_id`
+is the run the match shows, and it starts null for every existing match: nothing
+has been tracked yet, and a migration must not start work. A run's calibration is
+not cascaded, so a calibration that a run used cannot be deleted on its own.
 
 `matches` gains a foreign key, which SQLite cannot add with ALTER, and batch
 mode would rebuild the table. With foreign keys on, dropping the old `matches`
@@ -44,6 +45,7 @@ def upgrade() -> None:
         sa.Column("model_version", sa.String(length=128), nullable=False),
         sa.Column("config_json", sa.JSON(), nullable=False),
         sa.Column("config_hash", sa.String(length=64), nullable=False),
+        sa.Column("calibration_id", sa.Uuid(), nullable=False),
         sa.Column("artifact_storage_key", sa.String(length=512), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
@@ -63,6 +65,12 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(
             ["parent_run_id"], ["model_runs.id"], name="fk_model_runs_parent_run_id_model_runs"
+        ),
+        # Not cascaded: a calibration a run used must outlive the run's need for it.
+        sa.ForeignKeyConstraint(
+            ["calibration_id"],
+            ["court_calibrations.id"],
+            name="fk_model_runs_calibration_id_court_calibrations",
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("artifact_storage_key"),

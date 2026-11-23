@@ -4,8 +4,9 @@ import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 from sqlalchemy.orm import Session
+from tests_support_api import calibrated_match
 
-from pickleball_api.models import Match, ModelRun, ModelRunStage
+from pickleball_api.models import ModelRun, ModelRunStage
 from pickleball_api.run_artifacts import (
     ArtifactAlreadyWritten,
     NoArtifact,
@@ -29,11 +30,14 @@ def detections() -> pd.DataFrame:
 
 
 def detect_run(session: Session) -> ModelRun:
-    match = Match(name="Saturday doubles")
+    match, calibration = calibrated_match(session)
     run = ModelRun.start(
-        match, ModelRunStage.DETECT, model_version="yolo11m", config={"rate_hz": 15}
+        match,
+        ModelRunStage.DETECT,
+        calibration=calibration,
+        model_version="yolo11m",
+        config={"rate_hz": 15},
     )
-    session.add(match)
     session.commit()
     return run
 

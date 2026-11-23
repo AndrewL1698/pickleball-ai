@@ -252,18 +252,27 @@ CASCADE`), `source` (`manual`), `image_points`, `court_points`, `homography`,
 are only added: the newest is in force, so a recalibration destroys nothing.
 
 `model_runs`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `stage` (`detect` or
-`identify`), `model_version`, `config_json` (which records the `calibration_id` the run
-used: the court gate's for Detect, the projection's for Identify, per ADR 0001), `config_hash` (SHA-256 of the config with
-sorted keys, from `models.hash_config`), `artifact_storage_key` (nullable until the
-artifact is written; unique, never returned), `started_at`, `completed_at` (null
-while running), `parent_run_id` (FK to `model_runs`). A CHECK requires an `identify`
+`identify`), `model_version`, `config_json`, `config_hash` (SHA-256 of the config,
+with sorted keys, together with `calibration_id`, from `models.hash_config`),
+`calibration_id` (FK to `court_calibrations`, `NOT NULL`, not cascaded),
+`artifact_storage_key` (nullable until the artifact is written; unique, never
+returned), `started_at`, `completed_at` (null while running), `parent_run_id` (FK to
+`model_runs`). Both stages need a calibration (ADR 0001): Detect uses it to gate
+people before ByteTrack, and Identify uses it to project into court feet. The
+calibration is stored only in its column. Hashing it keeps a run made under an old
+calibration from looking reusable after a recalibration. A CHECK requires an `identify`
 run to have a parent and a `detect` run to have none, and another requires
 `completed_at >= started_at`. Indexed on `(match_id, started_at)`. Make runs with
-`ModelRun.start`, which also refuses an Identify run whose parent is not a Detect run
-of the same match. `Match.current_identify_run` accepts only an Identify run of
-that match. Runs are only added, and neither foreign key into `model_runs`
-cascades, so a run that a match shows or another run read cannot be deleted on its own.
-Deleting the match removes all of them.
+`ModelRun.start`, which takes a saved calibration of the same match and refuses an
+Identify run whose parent is not a Detect run of the same match. `Match.current_identify_run` accepts only an Identify run of
+that match. Runs are only added. Neither foreign key into `model_runs` cascades, so a run
+that a match shows or another run read cannot be deleted on its own. Nor can a
+calibration that a run used, or the reference frame under it. Deleting the match
+removes all of them.
+
+`CourtCalibration.reference_frame` exists so the ORM orders its writes. Without it,
+deleting a match through the ORM could delete a frame before the calibration and run
+that depend on it.
 
 `matches.current_identify_run_id` and `model_runs.match_id` point at each other. The
 ORM gets through that cycle with `post_update` on `Match.current_identify_run`.
@@ -602,8 +611,8 @@ a match with no images, so they will not fill it in. Downgrading forgets the res
 
 ### Migration 0008: model runs
 
-Adds `model_runs` and nullable `matches.current_identify_run_id`, and enqueues
-nothing. Every existing match shows no run. On SQLite the new column and its foreign
+Adds `model_runs`, with a required `calibration_id`, and nullable
+`matches.current_identify_run_id`, and enqueues nothing. Every existing match shows no run. On SQLite the new column and its foreign
 key are added with one plain `ALTER TABLE ... ADD COLUMN`, not batch mode, because
 rebuilding `matches` with foreign keys on would cascade-delete everything the match
 owns. `test_migration_0008.py` checks that nothing is lost. Downgrading forgets every
