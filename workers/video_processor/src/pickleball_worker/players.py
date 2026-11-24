@@ -45,17 +45,13 @@ from pickleball_ml.players.detect import (
     DetectBackend,
     DetectChunk,
     DetectConfig,
+    DetectRunConfig,
     TrackingUnavailable,
     detect_chunks,
     load_yolo_backend,
 )
 from pickleball_ml.video.reader import VideoReadError
-from pickleball_ml.video.steady_part import (
-    CameraMove,
-    SteadyPart,
-    UndefinedSteadyPart,
-    steady_part,
-)
+from pickleball_ml.video.steady_part import CameraMove, UndefinedSteadyPart, steady_part
 from pickleball_worker.job_updates import JobProgressWriter, finish_job
 
 logger = logging.getLogger(__name__)
@@ -65,7 +61,7 @@ MAX_RUNNING_PROGRESS = 0.99
 
 
 @dataclass(frozen=True)
-class DetectStage:
+class DetectSetup:
     """How a players job runs Detect: the configuration a new run gets, and how to
     load the detector for a configuration. A continued run uses its own."""
 
@@ -73,12 +69,22 @@ class DetectStage:
     load_backend: Callable[[DetectConfig], DetectBackend]
 
 
-def default_detect_stage(settings: Settings) -> DetectStage:
+def default_detect_setup(settings: Settings) -> DetectSetup:
     """YOLO from `settings.player_model_path`, with the default configuration."""
-    return DetectStage(
+    return DetectSetup(
         config=DetectConfig(),
         load_backend=partial(load_yolo_backend, settings.player_model_path),
     )
+
+
+@dataclass(frozen=True)
+class _ContinuedRun:
+    """An unfinished Detect run, as recorded: continued exactly as it was started."""
+
+    run_id: UUID
+    config: DetectRunConfig
+    model_version: str
+    chunks_done: int
 
 
 @dataclass(frozen=True)
@@ -91,10 +97,7 @@ class _Plan:
     #: A complete Detect run exists, so there is nothing to do.
     already_detected: bool
     #: The unfinished run to continue, or None to start one.
-    run_id: UUID | None
-    run_config: dict[str, Any] | None
-    run_model_version: str | None
-    chunks_done: int
+    continued: _ContinuedRun | None
     #: The run's calibration when continuing; the newest one when starting.
     calibration_id: UUID
     homography: list[list[float]]
@@ -102,7 +105,7 @@ class _Plan:
     camera_moves: tuple[CameraMove, ...] | None
 
 
-def run_players_job(job_id: UUID, storage: Storage, detect: DetectStage) -> dict[str, Any] | None:
+def run_players_job(job_id: UUID, storage: Storage, detect: DetectSetup) -> dict[str, Any] | None:
     """Run one players job to a terminal status."""
     plan = _claim(job_id)
     if plan is None:
@@ -153,10 +156,12 @@ def _claim(job_id: UUID) -> _Plan | None:
             video_key=video.storage_key,
             duration_seconds=metadata.duration_seconds,
             already_detected=match.complete_detect_run is not None,
-            run_id=None if run is None else run.id,
-            run_config=None if run is None else dict(run.config_json),
-            run_model_version=None if run is None else run.model_version,
-            chunks_done=0 if run is None else len(run.chunks),
+            continued=None if run is None else _ContinuedRun(
+                run_id=run.id,
+                config=DetectRunConfig.from_config(run.config_json),
+                model_version=run.model_version,
+                chunks_done=len(run.chunks),
+            ),
             calibration_id=calibration.id,
             homography=calibration.homography,
             reference_seconds=calibration.reference_frame.position_seconds,
@@ -168,38 +173,47 @@ def _claim(job_id: UUID) -> _Plan | None:
 
 
 def _run_detect(
-    plan: _Plan, storage: Storage, detect: DetectStage, report: JobProgressWriter
+    plan: _Plan, storage: Storage, detect: DetectSetup, report: JobProgressWriter
 ) -> dict[str, Any]:
     if plan.already_detected:
         return {"processor": "players", "detect": "already complete"}
 
-    if plan.run_config is None:
+    continued = plan.continued
+    if continued is None:
         try:
             steady = steady_part(plan.camera_moves, plan.reference_seconds)
         except UndefinedSteadyPart as exc:
             raise JobFailure(JobErrorCode.CAMERA_MOVED, str(exc)) from exc
         config = detect.config
     else:
-        run_config = dict(plan.run_config)
-        steady = SteadyPart.from_config(run_config.pop("steady_part"))
-        config = DetectConfig.from_config(run_config)
+        steady, config = continued.config.steady, continued.config.detect
 
     try:
         backend = detect.load_backend(config)
     except TrackingUnavailable as exc:
         raise JobFailure(JobErrorCode.TRACKING_UNAVAILABLE, str(exc)) from exc
 
-    if plan.run_id is None:
-        run_id = _start_run(plan, backend.model_version, config, steady)
-    elif backend.model_version != plan.run_model_version:
+    if continued is None:
+        run_id = _start_run(plan, backend.model_version, DetectRunConfig(
+            detect=config, steady=steady, runtime=backend.runtime
+        ))
+        first_chunk = 0
+    elif backend.model_version != continued.model_version:
         # Continuing with another model would not reproduce the finished chunks.
         raise JobFailure(
-            JobErrorCode.TRACKING_UNAVAILABLE,
-            f"run {plan.run_id} used {plan.run_model_version}, this worker has"
+            JobErrorCode.MODEL_CHANGED,
+            f"run {continued.run_id} used {continued.model_version}, this worker has"
             f" {backend.model_version}",
         )
     else:
-        run_id = plan.run_id
+        run_id, first_chunk = continued.run_id, continued.chunks_done
+        if dict(backend.runtime) != dict(continued.config.runtime):
+            # Same model and settings, so the output should match; a new device or
+            # library version can still shift a box by a pixel. Say so, and go on.
+            logger.warning(
+                "run %s continues on %s, not %s", run_id, dict(backend.runtime),
+                dict(continued.config.runtime),
+            )
 
     end = steady.end_seconds if steady.end_seconds is not None else plan.duration_seconds
     span = max(end - steady.start_seconds, 1e-9)
@@ -218,7 +232,7 @@ def _run_detect(
                 steady=steady,
                 detector=backend.detector,
                 new_tracker=backend.new_tracker,
-                first_chunk=plan.chunks_done,
+                first_chunk=first_chunk,
                 progress=progress,
             ):
                 _save_chunk(storage, run_id, chunk)
@@ -230,15 +244,13 @@ def _run_detect(
     return {
         "processor": "players",
         "detect_run": str(run_id),
-        "resumed_at_chunk": plan.chunks_done,
+        "resumed_at_chunk": first_chunk,
         "chunks_saved": saved,
         "steadiness": steady.steadiness,
     }
 
 
-def _start_run(
-    plan: _Plan, model_version: str, config: DetectConfig, steady: SteadyPart
-) -> UUID:
+def _start_run(plan: _Plan, model_version: str, config: DetectRunConfig) -> UUID:
     """Commit a new, empty Detect run before any work starts."""
     with session_scope() as session:
         match = session.get(Match, plan.match_id)
@@ -249,7 +261,7 @@ def _start_run(
             ModelRunStage.DETECT,
             calibration=calibration,
             model_version=model_version,
-            config={**config.to_config(), "steady_part": steady.to_config()},
+            config=config.to_config(),
         )
         session.flush()
         return run.id

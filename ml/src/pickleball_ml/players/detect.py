@@ -21,6 +21,7 @@ importing ultralytics (and so torch) only when called.
 import math
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import asdict, dataclass, field
+from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -119,6 +120,34 @@ class DetectConfig:
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> "DetectConfig":
         return cls(**config)
+
+
+@dataclass(frozen=True)
+class DetectRunConfig:
+    """Everything a Detect run records about how it was made: its `config_json`.
+
+    The detection settings, the steady part it covers, and the runtime it ran on
+    (device, library versions). A continued run uses the settings and steady part
+    recorded here, never the current defaults.
+    """
+
+    detect: DetectConfig
+    steady: SteadyPart
+    runtime: Mapping[str, str]
+
+    def to_config(self) -> dict[str, Any]:
+        return {
+            **self.detect.to_config(),
+            "steady_part": self.steady.to_config(),
+            "runtime": dict(self.runtime),
+        }
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> "DetectRunConfig":
+        settings = dict(config)
+        steady = SteadyPart.from_config(settings.pop("steady_part"))
+        runtime = settings.pop("runtime")
+        return cls(detect=DetectConfig.from_config(settings), steady=steady, runtime=runtime)
 
 
 @dataclass(frozen=True)
@@ -257,11 +286,13 @@ def _detect_frame(
 
 @dataclass(frozen=True)
 class DetectBackend:
-    """A detector, a way to make trackers, and the version that names the model."""
+    """A detector, a way to make trackers, the version that names the model, and
+    what it runs on (device and library versions), for the run record."""
 
     model_version: str
     detector: Detector
     new_tracker: Callable[[], Tracker]
+    runtime: Mapping[str, str] = field(default_factory=dict)
 
 
 class TrackingUnavailable(RuntimeError):
@@ -313,7 +344,14 @@ def load_yolo_backend(
 
         return ByteTracker(BYTETracker(SimpleNamespace(**tracker_settings)))
 
-    return DetectBackend(model_version=version, detector=YoloDetector(), new_tracker=new_tracker)
+    runtime = {
+        "device": device,
+        "ultralytics": package_version("ultralytics"),
+        "torch": package_version("torch"),
+    }
+    return DetectBackend(
+        model_version=version, detector=YoloDetector(), new_tracker=new_tracker, runtime=runtime
+    )
 
 
 class _Boxes:

@@ -11,11 +11,12 @@ from pickleball_ml.players.detect import (
     TRACK_ID_STRIDE,
     DetectChunk,
     DetectConfig,
+    DetectRunConfig,
     detect_chunks,
 )
 from pickleball_ml.video.fixtures import write_test_video
 from pickleball_ml.video.reader import Frame
-from pickleball_ml.video.steady_part import SteadyPart
+from pickleball_ml.video.steady_part import ExcludedPart, SteadyPart
 
 #: An image pixel is a court foot, 20 ft further from the far end than its row, so
 #: the gate (court plus margins: |x| <= 16, -36 <= y <= 34) is easy to place.
@@ -165,9 +166,32 @@ def test_a_steady_part_with_no_frames_left_still_ends_with_a_last_chunk(clip: Pa
     assert list(chunks[0].detections.columns) == DETECT_COLUMNS
 
 
+@pytest.mark.parametrize("fps", [30.0, 60.0])
+def test_detect_gives_the_same_detections_per_second_at_30_and_60_fps(
+    tmp_path: Path, fps: float
+) -> None:
+    video = write_test_video(tmp_path / f"clip_{fps:.0f}.mp4", frames=int(fps * 3), fps=fps)
+    detections = pd.concat(c.detections for c in run(video, chunk_seconds=300.0))
+    # Three people in each of 15 frames a second, for 3 s.
+    assert len(detections) == 3 * 15 * 3
+
+
 def test_the_config_round_trips_through_plain_values() -> None:
     config = DetectConfig(conf=0.3, chunk_seconds=60.0)
     assert DetectConfig.from_config(config.to_config()) == config
+
+
+def test_a_run_config_records_settings_steady_part_and_runtime_and_round_trips() -> None:
+    recorded = DetectRunConfig(
+        detect=DetectConfig(chunk_seconds=60.0),
+        steady=SteadyPart(0.0, 368.0, (ExcludedPart(368.0, None, 368.0),), "moved"),
+        runtime={"device": "mps", "torch": "2.9.0"},
+    )
+    config = recorded.to_config()
+    assert config["rate_hz"] == 15.0
+    assert config["steady_part"]["excluded"][0]["moved_at_seconds"] == 368.0
+    assert config["runtime"] == {"device": "mps", "torch": "2.9.0"}
+    assert DetectRunConfig.from_config(config) == recorded
 
 
 def test_the_tracker_buffer_is_kept_at_two_seconds_whatever_the_rate() -> None:

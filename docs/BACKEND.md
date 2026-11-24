@@ -530,7 +530,8 @@ continue or which calibration to start one with. Then:
    naming the model file and its SHA-256 and `config_json` holding `imgsz`, `conf`,
    the gate margins, ByteTrack's settings, the rate, the chunk length, and the steady
    part: its range, its `excluded` parts (each with the `moved_at_seconds` a page
-   would show as "the camera moved at 6:08") and its `steadiness`. So `config_hash`
+   would show as "the camera moved at 6:08") and its `steadiness`, and the `runtime`:
+   device and ultralytics and torch versions (`DetectRunConfig`). So `config_hash`
    covers all of it.
 4. **The chunks.** The video is decoded once, in order. Every frame is grabbed, but
    only about 15 a second are converted and detected: the first frame at or after each
@@ -555,7 +556,8 @@ part, and skips the frames before it without converting them. Because the tracke
 restarts at each chunk and whether a frame is sampled depends only on timestamps, the
 result is identical to a run that was never interrupted; a test kills one partway and
 compares. A worker whose model file has a different SHA-256 from the run's refuses to
-continue it (`tracking_unavailable`). A job for a match whose Detect run is complete
+continue it (`model_changed`). A different device or library version only logs a
+warning, since the output should match to within a pixel. A job for a match whose Detect run is complete
 finishes at once without detecting anything.
 
 ### Calibration Images
@@ -662,7 +664,7 @@ uv run alembic -c apps/api/alembic.ini revision --autogenerate -m "what changed"
 ```
 
 Alembic does not autogenerate CHECK constraints, so a change to `JobStatus`,
-`JobStage`, `MatchStatus`, `ReferenceFrameKind`, `CalibrationSource` or
+`JobStage`, `JobKind`, `MatchStatus`, `ReferenceFrameKind`, `CalibrationSource` or
 `ModelRunStage` needs its migration written by hand; `0002` is the pattern.
 
 ### Migration 0003: introducing `matches`

@@ -41,7 +41,7 @@ from pickleball_ml.players.detect import (
 )
 from pickleball_ml.video.fixtures import write_test_video
 from pickleball_ml.video.reader import Frame
-from pickleball_worker.players import DetectStage, default_detect_stage
+from pickleball_worker.players import DetectSetup, default_detect_setup
 from pickleball_worker.tasks import run_analysis_job
 
 FPS, FRAMES = 30.0, 105  # 3.5 s
@@ -50,6 +50,7 @@ ON_COURT = [[1.0, 0.0, 0.0], [0.0, 1.0, -20.0], [0.0, 0.0, 1.0]]
 #: A recalibration that would put everyone 1000 ft off court, outside the gate.
 FAR_AWAY = [[1.0, 0.0, 1000.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 MODEL = "fake.pt@sha256:0123"
+RUNTIME = {"device": "fake", "ultralytics": "0", "torch": "0"}
 
 
 class Killed(BaseException):
@@ -82,11 +83,13 @@ class FakeTracker:
         return np.arange(1, len(xyxy) + 1, dtype=np.int64)
 
 
-def stage(detector: FakeDetector, *, model: str = MODEL) -> DetectStage:
+def stage(detector: FakeDetector, *, model: str = MODEL) -> DetectSetup:
     def load(config: DetectConfig) -> DetectBackend:
-        return DetectBackend(model_version=model, detector=detector, new_tracker=FakeTracker)
+        return DetectBackend(
+            model_version=model, detector=detector, new_tracker=FakeTracker, runtime=RUNTIME
+        )
 
-    return DetectStage(config=DetectConfig(chunk_seconds=1.0), load_backend=load)
+    return DetectSetup(config=DetectConfig(chunk_seconds=1.0), load_backend=load)
 
 
 @pytest.fixture
@@ -157,7 +160,7 @@ def players_job(match_id: uuid.UUID) -> AnalysisJob:
         return match.latest_job
 
 
-def run_players(match_id: uuid.UUID, storage: LocalFileStorage, detect: DetectStage) -> Any:
+def run_players(match_id: uuid.UUID, storage: LocalFileStorage, detect: DetectSetup) -> Any:
     return run_analysis_job(str(players_job(match_id).id), storage=storage, detect=detect)
 
 
@@ -223,6 +226,7 @@ def test_a_players_job_detects_the_whole_steady_video_chunk_by_chunk(
     config = run.config_json
     assert (config["rate_hz"], config["chunk_seconds"], config["imgsz"]) == (15.0, 1.0, 1280)
     assert config["tracker"]["track_buffer"] == 30
+    assert config["runtime"] == RUNTIME
     assert config["steady_part"] == {
         "start_seconds": 0.0, "end_seconds": None, "excluded": [], "steadiness": "steady"
     }
@@ -316,7 +320,7 @@ def test_a_run_is_not_continued_with_a_different_model(
     queue_another_players_job(match_id)
     run_players(match_id, storage, stage(FakeDetector(), model="other.pt@sha256:9999"))
     job = players_job(match_id)
-    assert (job.status, job.error_code) == (JobStatus.FAILED, "tracking_unavailable")
+    assert (job.status, job.error_code) == (JobStatus.FAILED, "model_changed")
     assert len(detect_runs(match_id)[0].chunks) == 2
 
 
@@ -397,7 +401,7 @@ def test_a_worker_without_tracking_fails_the_job_with_a_clear_code(
     def unavailable(config: DetectConfig) -> DetectBackend:
         raise TrackingUnavailable("ultralytics and torch are not installed")
 
-    run_players(match_id, storage, DetectStage(config=DetectConfig(), load_backend=unavailable))
+    run_players(match_id, storage, DetectSetup(config=DetectConfig(), load_backend=unavailable))
     job = players_job(match_id)
     assert (job.status, job.error_code) == (JobStatus.FAILED, "tracking_unavailable")
     assert detect_runs(match_id) == []
@@ -410,7 +414,7 @@ def test_the_default_stage_without_a_model_file_fails_with_that_code(
     """The real loader, which refuses before it would import torch."""
     match_id = make_match()
     settings = Settings(environment="test", player_model_path=tmp_path / "missing.pt")
-    run_players(match_id, storage, default_detect_stage(settings))
+    run_players(match_id, storage, default_detect_setup(settings))
     assert players_job(match_id).error_code == "tracking_unavailable"
 
 
