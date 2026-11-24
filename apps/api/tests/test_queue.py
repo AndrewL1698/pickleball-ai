@@ -40,6 +40,14 @@ def test_the_configured_queue_name_and_timeout_are_used(redis: FakeStrictRedis) 
     assert Queue("other", connection=redis).jobs[0].timeout == 123
 
 
+def test_a_job_can_be_given_its_own_time_limit(redis: FakeStrictRedis) -> None:
+    """Player tracking runs about as long as the match, past the default limit."""
+    queue = RedisJobQueue(redis, "analysis", job_timeout_seconds=60)
+    queue.enqueue(uuid.uuid4(), timeout_seconds=14400)
+    queue.enqueue(uuid.uuid4())
+    assert [job.timeout for job in Queue("analysis", connection=redis).jobs] == [14400, 60]
+
+
 def test_the_task_path_is_the_worker_module_the_api_never_imports() -> None:
     assert TASK_PATH == "pickleball_worker.tasks.run_analysis_job"
 

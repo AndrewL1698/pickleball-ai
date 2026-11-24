@@ -3,14 +3,21 @@ name = "pickleball-worker"
 version = "0.1.0"
 description = "RQ worker that runs analysis jobs for uploaded videos"
 requires-python = ">=3.13,<3.14"
-# pickleball-ml without the `tracking` extra: the worker reads video metadata
-# with OpenCV and must not install or import torch. The dependency points one
-# way, worker -> ml; nothing in ml imports the worker or the API.
+# pickleball-ml without the `tracking` extra: the base worker reads video
+# metadata with OpenCV and does not import torch, so the Docker image (shared
+# with the API) stays torch-free. The dependency points one way, worker -> ml;
+# nothing in ml imports the worker or the API.
 dependencies = [
     "pickleball-api",
     "pickleball-ml",
     "rq>=2",
 ]
+
+[project.optional-dependencies]
+# Players jobs (person detection and ByteTrack) need ultralytics and torch. The
+# native worker on Apple Silicon installs this; without it a players job fails
+# with `tracking_unavailable` rather than an import error.
+tracking = ["pickleball-ml[tracking]"]
 
 [project.scripts]
 pbworker = "pickleball_worker.__main__:main"

@@ -1018,12 +1018,19 @@ dependencies = [
     { name = "rq" },
 ]
 
+[package.optional-dependencies]
+tracking = [
+    { name = "pickleball-ml", extra = ["tracking"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "pickleball-api", editable = "apps/api" },
     { name = "pickleball-ml", editable = "ml" },
+    { name = "pickleball-ml", extras = ["tracking"], marker = "extra == 'tracking'", editable = "ml" },
     { name = "rq", specifier = ">=2" },
 ]
+provides-extras = ["tracking"]
 
 [[package]]
 name = "pillow"

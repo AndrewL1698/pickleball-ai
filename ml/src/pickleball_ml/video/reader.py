@@ -184,6 +184,69 @@ def iter_frames(
         cap.release()
 
 
+#: Slack when comparing a timestamp with a tick. Containers often store whole
+#: milliseconds, so the frame meant for the tick at 66.67 ms says 66.
+TICK_TOLERANCE_MS = 1.0
+
+
+class RateSampler:
+    """Keeps the first frame at or after each tick of a clock running at `rate_hz`.
+
+    Set in time rather than as a frame stride, so 30 fps and 59.94 fps video give
+    the same samples per second, and a variable frame rate cannot drift. Whether a
+    frame is kept depends only on its own timestamp and the previous frame's, so a
+    pass that starts partway through keeps exactly the frames a full pass would.
+    """
+
+    def __init__(self, rate_hz: float) -> None:
+        if not math.isfinite(rate_hz) or rate_hz <= 0:
+            raise ValueError(f"rate must be positive, not {rate_hz!r}")
+        self.rate_hz = rate_hz
+        self._previous_tick = -1
+
+    def keep(self, timestamp_ms: float) -> bool:
+        """Whether to keep the next frame, given its timestamp. Call once per frame, in order."""
+        tick = math.floor((timestamp_ms + TICK_TOLERANCE_MS) * self.rate_hz / 1000.0)
+        if tick > self._previous_tick:
+            self._previous_tick = tick
+            return True
+        return False
+
+
+def iter_frames_at_rate(
+    path: Path,
+    rate_hz: float,
+    start_seconds: float = 0.0,
+    end_seconds: float | None = None,
+) -> Iterator[tuple[int, float, Frame]]:
+    """Yield (frame_number, timestamp_ms, image) at about `rate_hz`, for frames whose
+    timestamp is in [start_seconds, end_seconds).
+
+    One sequential pass: every frame is grabbed so the sampler sees every timestamp,
+    but only kept frames in the range are converted to images, and decoding stops
+    at `end_seconds`.
+    """
+    sampler = RateSampler(rate_hz)
+    start_ms = start_seconds * 1000.0
+    end_ms = None if end_seconds is None else end_seconds * 1000.0
+    cap = _open(path)
+    try:
+        frame_number = -1
+        while cap.grab():
+            frame_number += 1
+            timestamp_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC))
+            if end_ms is not None and timestamp_ms >= end_ms:
+                return
+            if not sampler.keep(timestamp_ms) or timestamp_ms < start_ms:
+                continue
+            ok, image = cap.retrieve()
+            if not ok:
+                return
+            yield frame_number, timestamp_ms, cast(Frame, image)
+    finally:
+        cap.release()
+
+
 def read_frame(path: Path, frame_number: int) -> Frame:
     for _, _, image in iter_frames(path, start_frame=frame_number, end_frame=frame_number + 1):
         return image

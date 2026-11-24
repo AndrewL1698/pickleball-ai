@@ -81,8 +81,11 @@ in `docs/PHASE_0B_RESULTS.md`.
   lines and a top-down court. The job also compares its sampled frames for a moved
   camera, and the calibration page warns when it finds one.
 
-Processing does nothing more than that yet: no model is loaded and nothing in a
-frame is analysed, and the web app says so on the page.
+- **Player detection (Phase 3, in progress):** saving a match's first calibration
+  queues a players job. The worker runs person detection, the court gate and
+  ByteTrack (*Detect*) over the steady part of the video, about 15 frames a
+  second, saving five-minute chunks as it goes so a failed job can be continued.
+  Its output is image-space detections only; nothing shows it on a page yet.
 
 ## Development Setup
 
@@ -147,6 +150,21 @@ uv run pbapi                      # http://127.0.0.1:8000, --reload while develo
 uv run pbworker                   # consumes the analysis queue; --burst to exit when empty
 ```
 
+Players jobs load the person detector from `PICKLEBALL_PLAYER_MODEL_PATH`
+(default `weights/yolo26m.pt`, relative to where the worker starts) and need torch,
+which the worker's `tracking` extra installs. `uv sync` at the root already has it;
+a worker installed on its own needs `uv sync --package pickleball-worker --extra
+tracking`. On Apple Silicon it runs on `mps`. A worker without torch or the model
+file fails players jobs with `tracking_unavailable`.
+
+Continue a players job that failed partway, from its first unfinished chunk
+(answers `409` without a calibration, while a job is active, or once detection
+has finished):
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/matches/<match_id>/players-jobs
+```
+
 Upload a match's video and watch the job run:
 
 ```bash
@@ -186,12 +204,16 @@ endpoints are gone; the web app redirects `/videos` links to `/matches`. Migrati
 0005 and 0006 add calibration images and calibrations. A match that already has
 metadata has no images and nothing is queued for it: use the **Make calibration
 images** button on its page. Migration 0007 adds the camera check. A video processed
-before it stays not checked unless it is uploaded again.
+before it stays not checked unless it is uploaded again. Migrations 0009 and 0010 add
+the job's `kind` and the chunks of a Detect run, and queue nothing: an already
+calibrated match gets its players job from `POST .../players-jobs`.
 
-The worker and the API import OpenCV (through `pickleball_ml.video` and
+The API and the base worker import OpenCV (through `pickleball_ml.video` and
 `pickleball_ml.court.geometry`) but not torch: both depend on `pickleball-ml`
-without its `tracking` extra. `uv sync` at the root still installs everything, extra
-included, for the Phase 0 CLI.
+without its `tracking` extra, so the Docker image stays torch-free. The worker
+imports ultralytics only when a players job loads the detector. `uv sync` at the
+root still installs everything, extras included, for the Phase 0 CLI and the
+native worker.
 
 Uploads are written to `data/uploads/` (gitignored) under a generated key, never
 under the uploaded filename. Every environment variable, the full endpoint list,

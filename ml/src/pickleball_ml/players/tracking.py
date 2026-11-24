@@ -129,7 +129,7 @@ def track_people(
     run = {
         "stage": "player_detection_tracking",
         "model_name": Path(config.model).name,
-        "model_sha256": _sha256(Path(config.model)),
+        "model_sha256": file_sha256(Path(config.model)),
         "ultralytics_version": version("ultralytics"),
         "torch_version": version("torch"),
         "tracker_config": tracker_settings,
@@ -145,7 +145,8 @@ def track_people(
     return detections, run
 
 
-def _sha256(path: Path) -> str | None:
+def file_sha256(path: Path) -> str | None:
+    """The file's SHA-256 as hex, or None if there is no file."""
     if not path.exists():
         return None
     digest = hashlib.sha256()

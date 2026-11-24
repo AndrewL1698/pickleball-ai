@@ -18,7 +18,8 @@ stored images are deleted; it does not reach `ready` first.
 
 The task takes a job id and nothing else. Everything it needs it reads from
 PostgreSQL, so the queue is not a channel through which paths, filenames, or
-configuration can be injected.
+configuration can be injected. That includes what kind of job it is: a players
+job goes to `pickleball_worker.players`, everything else to the processor.
 """
 
 import logging
@@ -29,9 +30,18 @@ from uuid import UUID
 from pickleball_api.config import Settings, get_settings
 from pickleball_api.db import session_scope
 from pickleball_api.errors import JobErrorCode, JobFailure
-from pickleball_api.jobs import InvalidJobTransition, report_progress, transition
-from pickleball_api.models import AnalysisJob, JobStage, JobStatus, ReferenceFrame, utcnow
+from pickleball_api.jobs import transition
+from pickleball_api.models import (
+    AnalysisJob,
+    JobKind,
+    JobStage,
+    JobStatus,
+    ReferenceFrame,
+    utcnow,
+)
 from pickleball_api.storage import LocalFileStorage, Storage
+from pickleball_worker.job_updates import JobProgressWriter, finish_job
+from pickleball_worker.players import DetectSetup, default_detect_setup, run_players_job
 from pickleball_worker.processors import (
     ProcessingResult,
     VideoProcessor,
@@ -47,31 +57,34 @@ def run_analysis_job(
     processor: VideoProcessor | None = None,
     storage: Storage | None = None,
     settings: Settings | None = None,
+    detect: DetectSetup | None = None,
 ) -> dict[str, Any] | None:
     """Run one analysis job to a terminal status.
 
-    The optional arguments exist for tests and for a future processor that is
-    chosen per job; RQ calls this with the id alone.
+    The optional arguments exist for tests; RQ calls this with the id alone.
+    `processor` runs a preparation job and `detect` a players job.
     """
     settings = settings or get_settings()
-    processor = processor or default_processor()
     storage = storage or LocalFileStorage(settings.upload_dir)
     identifier = UUID(job_id)
+    if _kind_of(identifier) is JobKind.PLAYERS:
+        return run_players_job(identifier, storage, detect or default_detect_setup(settings))
+    processor = processor or default_processor()
 
     video = _claim(identifier)
     if video is None:
         return None
 
     try:
-        result = processor.process(video, storage, _ProgressReporter(identifier))
+        result = processor.process(video, storage, JobProgressWriter(identifier))
     except JobFailure as exc:
         logger.warning("job %s failed: %s", identifier, exc.detail or exc.code)
-        _finish(identifier, JobStatus.FAILED, error_code=exc.code)
+        finish_job(identifier, JobStatus.FAILED, error_code=exc.code)
         return None
     except Exception:
         # The traceback is the operator's; the user gets the code alone.
         logger.exception("job %s failed unexpectedly", identifier)
-        _finish(identifier, JobStatus.FAILED, error_code=JobErrorCode.INTERNAL)
+        finish_job(identifier, JobStatus.FAILED, error_code=JobErrorCode.INTERNAL)
         return None
 
     try:
@@ -82,13 +95,20 @@ def run_analysis_job(
         # `running`; fail it rather than leave it there or call it ready.
         logger.exception("job %s: could not record its result", identifier)
         _discard_stills(storage, result)
-        _finish(identifier, JobStatus.FAILED, error_code=JobErrorCode.INTERNAL)
+        finish_job(identifier, JobStatus.FAILED, error_code=JobErrorCode.INTERNAL)
         return None
     if not completed:
         _discard_stills(storage, result)
         return None
     logger.info("job %s ready: %s", identifier, result.summary)
     return result.summary
+
+
+def _kind_of(job_id: UUID) -> JobKind | None:
+    """The job's kind, or None if there is no such job (the claim then says so)."""
+    with session_scope() as session:
+        job = session.get(AnalysisJob, job_id)
+        return None if job is None else job.kind
 
 
 def _discard_stills(storage: Storage, result: ProcessingResult) -> None:
@@ -129,31 +149,6 @@ def _claim(job_id: UUID) -> VideoRef | None:
             content_type=video.content_type,
             byte_size=video.byte_size,
         )
-
-
-class _ProgressReporter:
-    """Writes a running job's progress, but not on every chunk read.
-
-    A multi-gigabyte video would otherwise produce thousands of UPDATEs that no
-    one will ever look at, so a report is skipped unless the stage changed or
-    progress moved by at least a percent.
-    """
-
-    def __init__(self, job_id: UUID, min_step: float = 0.01) -> None:
-        self._job_id = job_id
-        self._min_step = min_step
-        self._stage: JobStage | None = None
-        self._progress = -1.0
-
-    def __call__(self, stage: JobStage, progress: float) -> None:
-        if stage is self._stage and progress - self._progress < self._min_step:
-            return
-        self._stage, self._progress = stage, progress
-        with session_scope() as session:
-            job = session.get(AnalysisJob, self._job_id)
-            if job is None or job.status is not JobStatus.RUNNING:
-                return
-            report_progress(job, stage, progress)
 
 
 def _complete(job_id: UUID, result: ProcessingResult) -> bool:
@@ -202,30 +197,3 @@ def _complete(job_id: UUID, result: ProcessingResult) -> bool:
         # Also moves the match to `calibration_required`, in this same commit.
         transition(job, JobStatus.READY, stage=JobStage.METADATA_READY)
         return True
-
-
-def _finish(
-    job_id: UUID,
-    status: JobStatus,
-    *,
-    stage: JobStage | None = None,
-    error_code: JobErrorCode | None = None,
-) -> None:
-    """Record the outcome, unless the job is no longer ours to finish.
-
-    The match's status moves with the job, in the same commit.
-    """
-    with session_scope() as session:
-        job = session.get(AnalysisJob, job_id, with_for_update=True)
-        if job is None:
-            logger.warning("job %s vanished before it could be finished", job_id)
-            return
-        try:
-            transition(job, status, stage=stage, error_code=error_code)
-        except InvalidJobTransition:
-            # Already terminal. A retry must not overwrite the first verdict.
-            # `transition` refuses before it mutates anything, so there is
-            # nothing to undo and the surrounding commit is a no-op.
-            logger.warning(
-                "job %s is %s; refusing to record %s", job_id, job.status, status
-            )

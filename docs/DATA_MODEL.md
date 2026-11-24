@@ -102,9 +102,10 @@ every image coordinate the pipeline records is a display-orientation pixel.
 ```text
 id
 match_id
+kind                 # preparation (metadata, calibration images) / players (player tracking)
 stage                # INGESTED / METADATA_READY / COURT_READY / ...
 status               # queued / running / ready / failed (ready = this job finished, not the match)
-                     # at most one queued or running job per match (partial unique index)
+                     # at most one queued or running job per match, of any kind (partial unique index)
 progress
 model_run_id         # nullable; model details live in ModelRun
 error_code           # stable, machine-readable reason for a failure
@@ -116,6 +117,10 @@ completed_at
 `error_message` is never interpolated from an exception: a database error's text
 contains the connection string, password included, and most others carry
 absolute filesystem paths. The traceback is logged on the server instead.
+
+A `players` job runs on a calibrated match and never changes `Match.status`: its
+progress, failure and stage reached (`court_ready` while running, `players_ready`
+when done) live on the job. A calibration may be saved while one runs.
 
 ## ReferenceFrame
 
@@ -328,9 +333,9 @@ model_version        # names the model as well as its version
 config_json
 config_hash          # SHA-256 of config_json (sorted keys) together with calibration_id
 calibration_id       # the CourtCalibration the run used; required for both stages
-artifact_storage_key # nullable until written; the run's Parquet output
+artifact_storage_key # nullable until written; an Identify run's Parquet output (always null for Detect)
 started_at
-completed_at         # null while running, or if the run never finished
+completed_at         # null while running, or if the run never finished; Detect sets it with its last chunk
 parent_run_id        # nullable; the run this one read (Identify -> its Detect run)
 ```
 
@@ -348,6 +353,29 @@ recalibration. Runs are never updated once complete and never deleted, so the or
 prediction survives every correction, and a calibration a run used cannot be deleted
 on its own. `Match.current_identify_run_id` says which
 run the match is showing.
+
+A Detect run takes about an hour over a whole match, so its output is a set of
+chunks rather than one artifact, each committed as it finishes:
+
+```text
+ModelRunChunk
+id
+run_id               # the Detect run; deleting the run deletes its chunks
+index                # 0, 1, ... from the start of the run's steady part; unique per run
+start_seconds        # the stretch of video the chunk covers
+end_seconds
+storage_key          # one Parquet object per chunk
+completed_at
+```
+
+A retry continues the run from its first unfinished chunk, with the run's own
+calibration and configuration. A Detect run's `config_json` records the detector and
+tracker settings, the sampling rate (about 15 per second, set in time), the chunk
+length, and the steady part of the video it covers: its range, the parts excluded
+because the camera moved (with when it moved), and whether the camera was checked at
+all. Each detection row stores the image-space ground-contact point, `truncated`,
+`in_gate`, an appearance descriptor, confidence and `track_id`, unique across chunks,
+and no court coordinates.
 
 ## Key Design Rule
 

@@ -11,6 +11,9 @@ from pickleball_ml.court.spec import HALF_LENGTH_FT, HALF_WIDTH_FT
 
 BoolArray = NDArray[np.bool_]
 
+#: A box whose bottom is this close to the frame's bottom edge is cut off by it.
+EDGE_MARGIN_PX = 2
+
 
 @dataclass(frozen=True)
 class PlayArea:
@@ -41,8 +44,19 @@ def foot_points(xyxy: FloatArray) -> FloatArray:
     return np.column_stack([(boxes[:, 0] + boxes[:, 2]) / 2.0, boxes[:, 3]])
 
 
+def truncated(
+    y2: FloatArray, frame_height: int, edge_margin_px: int = EDGE_MARGIN_PX
+) -> BoolArray:
+    """Boxes cut off by the bottom of the frame, whose feet are not visible, so the
+    ground-contact point is unreliable."""
+    return np.asarray(np.asarray(y2, dtype=np.float64) >= frame_height - edge_margin_px)
+
+
 def project_detections(
-    detections: pd.DataFrame, homography: FloatArray, frame_height: int, edge_margin_px: int = 2
+    detections: pd.DataFrame,
+    homography: FloatArray,
+    frame_height: int,
+    edge_margin_px: int = EDGE_MARGIN_PX,
 ) -> pd.DataFrame:
     """Add ground-contact image point and its court coordinates to box rows.
 
@@ -56,5 +70,5 @@ def project_detections(
     out["image_y"] = feet[:, 1]
     out["court_x"] = court[:, 0]
     out["court_y"] = court[:, 1]
-    out["truncated"] = out["y2"] >= frame_height - edge_margin_px
+    out["truncated"] = truncated(out["y2"].to_numpy(), frame_height, edge_margin_px)
     return out

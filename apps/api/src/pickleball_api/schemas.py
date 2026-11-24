@@ -20,6 +20,7 @@ from pickleball_api.calibration import (
 from pickleball_api.models import (
     AnalysisJob,
     CalibrationSource,
+    JobKind,
     JobStage,
     JobStatus,
     Match,
@@ -35,6 +36,8 @@ class JobRead(BaseModel):
 
     id: UUID
     match_id: UUID
+    #: `preparation` (metadata, calibration images) or `players` (player tracking).
+    kind: JobKind
     status: JobStatus
     stage: JobStage
     progress: float = Field(ge=0.0, le=1.0)
@@ -203,6 +206,9 @@ class MatchDetail(MatchSummary):
     can_extract_reference_frames: bool
     #: Whether `POST /api/matches/{id}/calibrations` would accept a request.
     can_calibrate: bool
+    #: Whether `POST /api/matches/{id}/players-jobs` would accept a request: the
+    #: court is calibrated, no job is active, and player detection has not finished.
+    can_start_players_job: bool
 
     @classmethod
     def of(cls, match: Match) -> "MatchDetail":
