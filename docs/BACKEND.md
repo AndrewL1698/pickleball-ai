@@ -3,7 +3,8 @@
 The FastAPI service, the database, the storage layer and the job worker added in
 Phase 1, re-parented under `Match` in Phase 2 checkpoint 1, given real video
 metadata extraction in checkpoint 2, calibration images and court calibrations
-in checkpoints 3 and 4, and model runs with their stored artifacts in Phase 3.
+in checkpoints 3 and 4, and model runs with their stored artifacts and the
+players job that runs Detect in Phase 3.
 The architecture
 this is heading towards is in `ARCHITECTURE.md`, and the eventual schema is in
 `DATA_MODEL.md`.
@@ -14,15 +15,18 @@ It does: accept a video upload as a new match, store the file, record the match,
 its video and a job, queue the job, let a worker claim it, decode the video's
 metadata and make stills from it, drive the job through
 `queued -> running -> ready` (or `failed`) while the match's status follows, retry
-on request, fit and save a court calibration, and expose enough over HTTP for a
-frontend to list and inspect matches.
+on request, fit and save a court calibration, queue player tracking once the court is
+calibrated, run person detection over the video in checkpointed chunks, and expose
+enough over HTTP for a frontend to list and inspect matches.
 
-It does not analyse the match. The worker's `CalibrationPreparationProcessor` reads
-the video's dimensions, rotation, average frame rate, duration, frame count and
-codec, writes stills of it, with `pickleball_ml.video.reader`, and compares those
-frames for a moved camera, and nothing else: nothing about play is analysed and no
-model is loaded. It sits behind the same
-interface (`pickleball_worker.processors.VideoProcessor`) that later stages will use.
+There are two kinds of job (`analysis_jobs.kind`). A `preparation` job, which every
+upload gets, runs the worker's `CalibrationPreparationProcessor`: it reads the video's
+dimensions, rotation, average frame rate, duration, frame count and codec, writes
+stills of it, with `pickleball_ml.video.reader`, and compares those frames for a
+moved camera. A `players` job, queued by the first calibration, runs *Detect* (ADR
+0001): YOLO person detection, the court gate and ByteTrack, over the steady part of the
+video (see Player Detection). It writes image-space detections only. Identify, which
+turns them into players in court coordinates, is not here yet.
 
 There is no authentication and no video playback yet. The web app that drives this
 API is described in `FRONTEND.md`.
@@ -35,7 +39,7 @@ apps/api/                              # package `pickleball_api`
 ├── Dockerfile                         # shared by the api and worker compose services
 ├── migrations/
 │   ├── env.py                         # reads the URL from settings unless given one
-│   └── versions/                      # 0001 tables, 0002 CHECKs, 0003 matches, 0004 metadata, 0005 stills, 0006 calibrations, 0007 camera check, 0008 model runs
+│   └── versions/                      # 0001 tables, 0002 CHECKs, 0003 matches, 0004 metadata, 0005 stills, 0006 calibrations, 0007 camera check, 0008 model runs, 0009 job kind, 0010 run chunks
 ├── src/pickleball_api/
 │   ├── calibration.py                 # fits landmarks through pickleball_ml, or refuses them
 │   ├── config.py                      # typed settings, and the extension allowlist
@@ -44,9 +48,9 @@ apps/api/                              # package `pickleball_api`
 │   ├── errors.py                      # job error codes and their user-safe messages
 │   ├── jobs.py                        # the job state machine, match status sync, read queries
 │   ├── main.py                        # create_app(): middleware, routers, error handlers
-│   ├── models.py                      # Match, Video, AnalysisJob, ReferenceFrame, CourtCalibration, ModelRun
+│   ├── models.py                      # Match, Video, AnalysisJob, ReferenceFrame, CourtCalibration, ModelRun, ModelRunChunk
 │   ├── queue.py                       # JobQueue interface, RQ and recording implementations
-│   ├── run_artifacts.py               # a model run's Parquet artifact, written and read through Storage
+│   ├── run_artifacts.py               # a run's Parquet artifact, or a Detect run's chunks, through Storage
 │   ├── schemas.py                     # Pydantic response models
 │   ├── limits.py                      # refuses an oversized body before it is read
 │   ├── storage.py                     # Storage interface, local filesystem implementation
@@ -59,7 +63,9 @@ apps/api/                              # package `pickleball_api`
 workers/video_processor/               # package `pickleball_worker`
 ├── src/pickleball_worker/
 │   ├── processors.py                  # VideoProcessor, MetadataProcessor, CalibrationPreparationProcessor
-│   ├── tasks.py                       # the RQ task and its transaction boundaries
+│   ├── players.py                     # players jobs: Detect, chunk by chunk, resumable
+│   ├── job_updates.py                 # a running job's progress and its outcome
+│   ├── tasks.py                       # the RQ task, dispatch by job kind, transaction boundaries
 │   └── __main__.py                    # `pbworker`
 └── tests/
 ```
@@ -71,16 +77,19 @@ Both are uv workspace members alongside `ml/`.
 ```text
 pickleball_ml      imports nothing from this repository
 pickleball_api     imports pickleball_ml.court.geometry and .spec, never pickleball_worker
-pickleball_worker  imports pickleball_api and pickleball_ml.video
+pickleball_worker  imports pickleball_api, pickleball_ml.video and pickleball_ml.players.detect
 ```
 
-This is what keeps torch and ultralytics out of the API process. Neither depends
-on anything else in `pickleball_ml`, and both depend on `pickleball-ml` **without**
-its `tracking` extra: the base install is OpenCV, NumPy and the light libraries the
-pipeline modules import, while `ultralytics` (and through it torch) and `lap` are
-the extra, which the workspace root installs for the Phase 0 CLI. So the image
-contains neither torch nor ultralytics, and a test on each side asserts that
-importing it loads neither.
+This is what keeps torch and ultralytics out of the API process. Both depend on
+`pickleball-ml` **without** its `tracking` extra: the base install is OpenCV, NumPy
+and the light libraries the pipeline modules import, while `ultralytics` (and
+through it torch) and `lap` are the extra, which the workspace root installs for the
+Phase 0 CLI and the native worker. The worker has its own `tracking` extra, which
+pulls in `pickleball-ml[tracking]`; the Docker image installs the worker without it.
+`pickleball_ml.players.detect` imports ultralytics only inside `load_yolo_backend`,
+when a players job starts, so the image contains neither torch nor ultralytics, and
+a test on each side asserts that importing it loads neither. A worker without them
+fails players jobs with `tracking_unavailable`.
 
 The API imports the geometry so that there is one homography implementation, and
 so a person gets their calibration's error straight back. Fitting a dozen points
@@ -102,7 +111,8 @@ by importing the function, so the edge really does point one way.
 | `POST` | `/api/matches/{match_id}/metadata-jobs` | Queue a job for a match with no metadata. `202` with the match; `409` if refused; `503` if it cannot be queued |
 | `POST` | `/api/matches/{match_id}/reference-frame-jobs` | Queue a job for a match with metadata but no calibration images. Answers as above |
 | `GET` | `/api/matches/{match_id}/reference-frames/{frame_id}` | One calibration image, as `image/jpeg`. `404` if unknown, under another match, or gone from storage |
-| `POST` | `/api/matches/{match_id}/calibrations` | Fit and save a calibration. `201` with the match; `409` if refused; `422` with a sentence if the landmarks cannot make a court |
+| `POST` | `/api/matches/{match_id}/calibrations` | Fit and save a calibration, and queue a players job for a match never detected. `201` with the match; `409` if refused; `422` with a sentence if the landmarks cannot make a court |
+| `POST` | `/api/matches/{match_id}/players-jobs` | Queue a players job that continues an unfinished Detect run, or starts one. `202` with the match; `409` without a calibration, while a job is active, or once Detect has finished; `503` if it cannot be queued |
 | `GET` | `/api/jobs/{job_id}` | Status, stage, progress, timestamps, failure code, `match_id`. `404` if unknown |
 | `GET` | `/health` | Liveness. Touches no dependency |
 | `GET` | `/ready` | Readiness. Checks the database and Redis; `503` if either is down |
@@ -132,7 +142,7 @@ OpenAPI document moved to `0.2.0` for the break.
     "byte_size": 4032,
     "created_at": "2026-09-24T22:10:12.9Z"
   },
-  "latest_job": { "id": "…", "match_id": "…", "status": "ready", "stage": "metadata_ready", "…": "…" },
+  "latest_job": { "id": "…", "match_id": "…", "kind": "preparation", "status": "ready", "stage": "metadata_ready", "…": "…" },
   "jobs": [ "…every attempt, oldest first…" ]
 }
 ```
@@ -155,8 +165,9 @@ over the average) is an estimate. `codec` is the stream's FourCC, or null.
 right now, so the UI never offers an action the API will refuse.
 
 `MatchDetail` also carries `reference_frames` (the background first), `calibration`
-(the one in force, or null), and `can_extract_reference_frames` and `can_calibrate`,
-which work like `can_extract_metadata`. A calibration has:
+(the one in force, or null), and `can_extract_reference_frames`, `can_calibrate` and
+`can_start_players_job`, which work like `can_extract_metadata`. A job's `kind` is
+`preparation` or `players`. A calibration has:
 
 ```json
 {
@@ -231,13 +242,14 @@ Six tables. `matches` is the parent:
 | `metadata_extracted_at` | Null until decoded. A CHECK requires every decoded field to be present with it, and absent without it |
 | `camera_jumps` | JSON, nullable. Where sampled frames show the camera moved. Empty means none found, and null means not checked |
 
-`analysis_jobs`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `status`, `stage`,
+`analysis_jobs`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `kind` (`preparation` or
+`players`, default `preparation`), `status`, `stage`,
 `progress` (0.0-1.0, with a CHECK), `error_code`, `error_message`, `created_at`,
 `started_at`, `finished_at`. Indexed on `(match_id, created_at)`, which serves
 both "every job for this match" and "its latest job". The latest job is the
 newest `created_at`, ties broken by `id`. A partial unique index,
 `ux_analysis_jobs_one_active_per_match`, allows at most one `queued` or
-`running` job per match; job history is unaffected.
+`running` job per match, of any kind; job history is unaffected.
 
 `reference_frames`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `ordinal` (display
 order, unique within a match), `kind` (`background` or `sample`), `position_seconds`
@@ -255,8 +267,9 @@ are only added: the newest is in force, so a recalibration destroys nothing.
 `identify`), `model_version`, `config_json`, `config_hash` (SHA-256 of the config,
 with sorted keys, together with `calibration_id`, from `models.hash_config`),
 `calibration_id` (FK to `court_calibrations`, `NOT NULL`, not cascaded),
-`artifact_storage_key` (nullable until the artifact is written; unique, never
-returned), `started_at`, `completed_at` (null while running), `parent_run_id` (FK to
+`artifact_storage_key` (nullable until the artifact is written, and always null for a
+Detect run, whose output is its chunks; unique, never returned), `started_at`,
+`completed_at` (null while running; for Detect, set with its last chunk), `parent_run_id` (FK to
 `model_runs`). Both stages need a calibration (ADR 0001): Detect uses it to gate
 people before ByteTrack, and Identify uses it to project into court feet. The
 calibration is stored only in its column. Hashing it keeps a run made under an old
@@ -269,6 +282,13 @@ that match. Runs are only added. Neither foreign key into `model_runs` cascades,
 that a match shows or another run read cannot be deleted on its own. Nor can a
 calibration that a run used, or the reference frame under it. Deleting the match
 removes all of them.
+
+`model_run_chunks`: `id`, `run_id` (FK to `model_runs`, `ON DELETE CASCADE`), `index`
+(0, 1, … from the start of the run's steady part; `>= 0`), `start_seconds` and
+`end_seconds` (the video the chunk covers; a CHECK keeps the end after the start),
+`storage_key` (unique, never returned), `completed_at`. `(run_id, index)` is unique. A
+Detect run's output is its chunks, each a Parquet object committed with its row, so a
+retry finds the first unfinished chunk by counting them.
 
 `CourtCalibration.reference_frame` exists so the ORM orders its writes. Without it,
 deleting a match through the ORM could delete a frame before the calibration and run
@@ -304,10 +324,16 @@ does (`pickleball_api.jobs.transition`):
 | `ready` | `calibration_required` — unless it is already `court_ready` |
 | `failed` | `failed` |
 
+That table is for `preparation` jobs. A `players` job never moves its match: it runs
+on a calibrated match, which stays `court_ready` whether tracking is queued, running,
+finished or failed. Its progress, its failure and the stage it reached live on the
+job. No new match status was added for tracking.
+
 A new upload starts at `uploaded`. There is no `ready`, on purpose. Saving a
 calibration sets `court_ready`, in the same commit, and that is the only change to
-a match's status that does not come from a job. Once a match has images a job
-cannot be started for it, so nothing moves a calibrated match to `failed`.
+a match's status that does not come from a job. Once a match has images a
+preparation job cannot be started for it, so nothing moves a calibrated match to
+`failed`.
 
 `calibration_required` also means "metadata extracted", and for any job finished
 since checkpoint 3 "calibration images exist": the worker saves both in the same
@@ -346,8 +372,8 @@ Concurrency, queue failure and history work as in Retrying Extraction.
 
 `POST /api/matches/{match_id}/calibrations` takes `reference_frame_id` and
 `image_points`, keyed by landmark name, in that image's pixels. The match row is
-locked while it is checked. `409` when the match has no images or a job is active,
-and `422` with a fixed sentence when:
+locked while it is checked. `409` when the match has no images or a preparation job is
+active, and `422` with a fixed sentence when:
 
 - the image belongs to another match
 - there are fewer than four landmarks, or one is outside the image
@@ -356,10 +382,32 @@ and `422` with a fixed sentence when:
   clockwise, which no camera above the court can produce. This has to be its own
   check because a mirrored court fits just as well, so no error can reveal it.
 
+A calibration may be saved while a players job is queued or running. That Detect run
+keeps the calibration it recorded, and Identify uses the newest (ADR 0001).
+
+Saving a calibration queues a players job, committed with it, when Detect has never
+run on the match and no job is active. Saving again while that job is queued or
+running queues nothing, and so does any later recalibration: a recalibration never
+re-detects. A match whose Detect run a failed job left unfinished is continued with
+`POST .../players-jobs` instead. If the queue is down the players job is failed with
+`enqueue_failed` but the calibration stands and the answer is still `201`;
+`can_start_players_job` then offers the retry.
+
 A calibration that fits badly is saved and flagged rather than refused, because a
 person can look at the overlay and decide. `warnings` covers an error past 0.5 ft
 mean or 1.0 ft max (the worst careful Phase 0 calibration was 0.35 and 0.81), four
 landmarks, whose fit is always exact, and landmarks on only one half of the court.
+
+### Starting Player Tracking
+
+`POST /api/matches/{match_id}/players-jobs` queues a players job, with
+`PICKLEBALL_PLAYERS_JOB_TIMEOUT_SECONDS` as its time limit. It is accepted when the
+match has a calibration, no job is active, and no Detect run is complete
+(`Match.players_job_refusal()`, which `can_start_players_job` mirrors). The job
+continues the match's unfinished Detect run, with that run's own calibration and
+configuration rather than the newest calibration, or starts one if there is none.
+There is no button for it yet, and nothing reaps a players job whose worker was
+killed (see What Is Left).
 
 ### Job Status
 
@@ -376,10 +424,11 @@ is the only way to change a status, and it raises `InvalidJobTransition` rather
 than writing a contradictory row; the worker treats that refusal as "another
 attempt already finished this" and leaves the first verdict alone.
 
-The stage names follow the ladder in `ARCHITECTURE.md`. A job reaches
+The stage names follow the ladder in `ARCHITECTURE.md`. A preparation job reaches
 `metadata_ready` and stops; it stays at `ingested` while it runs, and only the task
-layer sets `metadata_ready`, once the result is saved. `court_ready` is not a job
-stage anything reaches, because a person calibrates the court and not a job.
+layer sets `metadata_ready`, once the result is saved. A players job starts at
+`court_ready`, the stage its match already reached when a person calibrated it,
+reports progress there, and finishes at `players_ready`.
 
 ## The Upload Path
 
@@ -441,6 +490,15 @@ commit can fail. A run that already has an artifact is refused with
 reads it back through `local_path`. It raises `NoArtifact` for a run that never wrote
 one, and `ObjectNotFound` if the file is gone.
 
+A Detect run writes chunks instead, with `write_detect_chunk(storage, run, index=…,
+start_seconds=…, end_seconds=…, frame=…, is_last=…)`: one Parquet object under a fresh
+key and one `ModelRunChunk` row, which the caller commits inside `discard_on_error`. It
+refuses an Identify run (`NotADetectRun`), a chunk out of order (`ChunkOutOfOrder`; the
+next is always `len(run.chunks)`) and a complete run (`RunAlreadyComplete`). The last
+chunk sets the run's `completed_at`. `read_detect_chunks(storage, run)` returns the
+finished chunks in order as one DataFrame. It works on an unfinished run too, and gives
+an empty DataFrame for a run with none.
+
 ## The Worker
 
 `pbworker` runs an RQ worker against the configured queue. The task takes a job
@@ -448,6 +506,57 @@ id and nothing else: everything else is read from PostgreSQL (job -> match ->
 video), so the queue is not a channel through which paths or configuration can
 be injected. A job whose match has no video is failed with
 `missing_video_file` during the claim, without ever reaching `running`.
+
+### Player Detection
+
+`run_analysis_job` reads the job's `kind` first and hands a players job to
+`pickleball_worker.players.run_players_job`. The claim locks the job, moves it to
+`running` at `court_ready`, and reads in the same transaction which Detect run to
+continue or which calibration to start one with. Then:
+
+1. **The steady part.** One homography fits one camera position. With
+   `videos.camera_jumps`, the video splits into steady parts `[0, first from]`,
+   `[to, next from]`, …, `[last to, end]`; the window inside a move belongs to none.
+   Detect covers the part holding the calibration's reference frame, a frame on a
+   boundary belonging to the part it bounds (`pickleball_ml.video.steady_part`). A
+   background still on a moved camera fits no part, and nor does a still taken while
+   the camera was moving: the job fails with `camera_moved`, asking for a calibration
+   on a single still. A video never checked (`camera_jumps` null) is tracked whole,
+   recorded as `steadiness: "unchecked"`.
+2. **The detector.** `load_yolo_backend` loads `PICKLEBALL_PLAYER_MODEL_PATH` on `mps`,
+   else `cuda`, else `cpu`. No model file, or no ultralytics/torch, fails the job with
+   `tracking_unavailable`.
+3. **The run.** A new Detect run is committed before any work, with `model_version`
+   naming the model file and its SHA-256 and `config_json` holding `imgsz`, `conf`,
+   the gate margins, ByteTrack's settings, the rate, the chunk length, and the steady
+   part: its range, its `excluded` parts (each with the `moved_at_seconds` a page
+   would show as "the camera moved at 6:08") and its `steadiness`. So `config_hash`
+   covers all of it.
+4. **The chunks.** The video is decoded once, in order. Every frame is grabbed, but
+   only about 15 a second are converted and detected: the first frame at or after each
+   1/15 s tick (`RateSampler`), so 30 fps, 59.94 fps and variable-rate video all give
+   the same rate. Each 5-minute chunk of the steady part is committed, object and row
+   together, before the next one starts. ByteTrack starts afresh at every chunk; its
+   lost-track buffer is two seconds of processed frames (30 at 15 Hz), and track ids
+   are offset by `chunk index * 1,000,000` so they stay unique.
+5. **Progress** is the share of the steady part done, reported at `court_ready`; the
+   job finishes `ready` at `players_ready`.
+
+Each detection row has `frame_number`, `timestamp_ms`, `track_id` (-1 when the person
+is outside the gate or not tracked), the box, `confidence`, the ground-contact point in
+image pixels (`image_x`, `image_y`, the bottom centre of the box), `truncated` (the box
+touches the bottom of the frame), `in_gate`, and a clothing-colour `appearance`
+descriptor for gated people. There are no court coordinates: Identify derives those
+from the current calibration (ADR 0001).
+
+**Resuming.** A players job on a match with an unfinished Detect run continues it from
+its first unfinished chunk, with the run's own calibration, configuration and steady
+part, and skips the frames before it without converting them. Because the tracker
+restarts at each chunk and whether a frame is sampled depends only on timestamps, the
+result is identical to a run that was never interrupted; a test kills one partway and
+compares. A worker whose model file has a different SHA-256 from the run's refuses to
+continue it (`tracking_unavailable`). A job for a match whose Detect run is complete
+finishes at once without detecting anything.
 
 ### Calibration Images
 
@@ -523,6 +632,8 @@ Every variable is prefixed `PICKLEBALL_` and read by both processes. Copy
 | `PICKLEBALL_REDIS_URL` | `redis://localhost:6379/0` | Queue backend |
 | `PICKLEBALL_QUEUE_NAME` | `analysis` | RQ queue |
 | `PICKLEBALL_JOB_TIMEOUT_SECONDS` | `3600` | Per-job timeout |
+| `PICKLEBALL_PLAYERS_JOB_TIMEOUT_SECONDS` | `14400` | Players jobs' timeout. Tracking takes about as long as the match |
+| `PICKLEBALL_PLAYER_MODEL_PATH` | `weights/yolo26m.pt` | The worker's person detector, relative to where it starts |
 | `PICKLEBALL_UPLOAD_DIR` | `data/uploads` | Where uploads are written |
 | `PICKLEBALL_MAX_UPLOAD_BYTES` | `2147483648` | 2 GiB |
 | `PICKLEBALL_ALLOWED_VIDEO_EXTENSIONS` | `[".mp4",".mov",".m4v"]` | Each needs a `VIDEO_CONTENT_TYPES` entry |
@@ -617,6 +728,19 @@ key are added with one plain `ALTER TABLE ... ADD COLUMN`, not batch mode, becau
 rebuilding `matches` with foreign keys on would cascade-delete everything the match
 owns. `test_migration_0008.py` checks that nothing is lost. Downgrading forgets every
 run, and the artifacts stay in storage until something removes them.
+
+### Migration 0009: job kind
+
+Adds `analysis_jobs.kind`, `NOT NULL` with a server default of `preparation` and a CHECK,
+so every existing job is a preparation job. On SQLite it is one plain `ALTER TABLE ...
+ADD COLUMN`, as in 0008, so the table and its partial unique index are not rebuilt.
+Nothing is queued: an already calibrated match gets player tracking from
+`POST .../players-jobs`. Downgrading drops the column.
+
+### Migration 0010: Detect run chunks
+
+Adds `model_run_chunks`. Existing runs have none. Downgrading forgets them, and their
+objects stay in storage until something removes them.
 
 ## Dependencies and Processes
 
@@ -758,8 +882,9 @@ Known gaps in what is here:
   there is no endpoint to change them.
 - **No deletion endpoint**, which `ARCHITECTURE.md` requires for privacy. Calibration
   images are personal data too, since a still shows the players.
-- **A camera that moved is not detected.** One calibration cannot be right on both
-  sides of a move; the calibration page warns about it, but nothing checks.
+- **Only one camera position is tracked.** One calibration cannot be right on both
+  sides of a move, so a players job tracks the steady part holding the calibration's
+  image and records the rest as excluded. Nothing tracks the excluded parts yet.
 - **The size limit bounds what is stored more tightly than what is buffered.**
   An upload declaring an oversized `Content-Length` is refused by middleware
   before the body is read, which covers every ordinary client. A chunked
@@ -772,7 +897,9 @@ Known gaps in what is here:
   The same applies to a crash between the commit and the enqueue, which leaves
   a `queued` row with nothing on the queue. Since checkpoint 2 this also blocks
   the retry endpoint for that match, because the stuck job counts as active;
-  the fix is the reaper, not loosening the one-active-job rule.
+  the fix is the reaper, not loosening the one-active-job rule. A killed players job
+  is the expensive case: its finished chunks are safe, but nothing can continue the
+  run until the stuck job is failed.
 - **Duration is an estimate.** It is frame count over average frame rate, not
   the container's own duration, which OpenCV does not expose. For variable
   frame-rate video the two can differ slightly.

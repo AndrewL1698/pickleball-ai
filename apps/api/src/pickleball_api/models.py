@@ -647,8 +647,9 @@ class ModelRun(Base):
 
     Never updated after it completes and never deleted while its match exists:
     a recalibration or a correction is a new Identify run, and the original
-    prediction survives it. The run's output is a Parquet artifact in `Storage`
-    (see `pickleball_api.run_artifacts`), not rows in the database.
+    prediction survives it. The run's output is Parquet in `Storage` (see
+    `pickleball_api.run_artifacts`), not rows in the database: one artifact for an
+    Identify run, and a `ModelRunChunk` per finished chunk for a Detect run.
     """
 
     __tablename__ = "model_runs"
