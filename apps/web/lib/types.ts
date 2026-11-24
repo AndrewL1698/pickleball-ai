@@ -44,10 +44,19 @@ export const JOB_STAGES = [
 ] as const;
 export type JobStage = (typeof JOB_STAGES)[number];
 
+/**
+ * What a job does: `preparation` (metadata and calibration images, for every
+ * upload) or `players` (player tracking, once the court is calibrated). A
+ * players job never changes the match's status.
+ */
+export const JOB_KINDS = ["preparation", "players"] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+
 /** An analysis job. Timestamps are ISO 8601 with a `Z` offset. */
 export interface Job {
   id: string;
   match_id: string;
+  kind: JobKind;
   status: JobStatus;
   stage: JobStage;
   /** 0.0 to 1.0. */
@@ -201,6 +210,11 @@ export interface MatchDetail extends MatchSummary {
   can_extract_reference_frames: boolean;
   /** Whether the API would accept a calibration right now. */
   can_calibrate: boolean;
+  /**
+   * Whether the API would accept a players job: the court is calibrated, no job
+   * is active, and player detection has not finished.
+   */
+  can_start_players_job: boolean;
   /** Stills to calibrate on, the background first. Empty until a job makes them. */
   reference_frames: ReferenceFrame[];
   /** The calibration in force, or null if the court has not been calibrated. */

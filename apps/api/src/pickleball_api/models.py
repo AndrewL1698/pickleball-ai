@@ -56,6 +56,16 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+class JobKind(enum.StrEnum):
+    """What an analysis job does."""
+
+    #: Metadata, calibration images and the camera check, for every upload.
+    PREPARATION = "preparation"
+    #: Player tracking, once the court is calibrated. Runs Detect today;
+    #: Identify joins it later. Never changes the match's status.
+    PLAYERS = "players"
+
+
 class JobStatus(enum.StrEnum):
     """Lifecycle of one analysis attempt."""
 
@@ -115,7 +125,17 @@ class CalibrationRefusal(enum.StrEnum):
     """Why a match cannot be calibrated right now."""
 
     NO_REFERENCE_FRAMES = "no_reference_frames"
+    #: A preparation job is queued or running. A players job does not block.
     JOB_ACTIVE = "job_active"
+
+
+class PlayersJobRefusal(enum.StrEnum):
+    """Why a match cannot be given a players job right now."""
+
+    NO_CALIBRATION = "no_calibration"
+    JOB_ACTIVE = "job_active"
+    #: Detect has finished, and a recalibration never re-detects (ADR 0001).
+    ALREADY_DETECTED = "already_detected"
 
 
 class ReferenceFrameKind(enum.StrEnum):
@@ -318,9 +338,20 @@ class Match(Base):
     def can_extract_reference_frames(self) -> bool:
         return self.reference_frame_job_refusal() is None
 
+    @property
+    def active_job(self) -> "AnalysisJob | None":
+        """The job that is queued or running, if any. The partial unique index
+        allows one at most."""
+        return next((job for job in self.jobs if job.status in ACTIVE_JOB_STATUSES), None)
+
     def calibration_refusal(self) -> CalibrationRefusal | None:
-        """Why a calibration may not be saved, or None if it may."""
-        if any(job.status in ACTIVE_JOB_STATUSES for job in self.jobs):
+        """Why a calibration may not be saved, or None if it may.
+
+        A players job does not block a calibration: the running Detect keeps the
+        calibration its run recorded, and Identify uses the newest (ADR 0001).
+        """
+        active = self.active_job
+        if active is not None and active.kind is not JobKind.PLAYERS:
             return CalibrationRefusal.JOB_ACTIVE
         if not self.reference_frames:
             return CalibrationRefusal.NO_REFERENCE_FRAMES
@@ -329,6 +360,51 @@ class Match(Base):
     @property
     def can_calibrate(self) -> bool:
         return self.calibration_refusal() is None
+
+    @property
+    def detect_runs(self) -> list["ModelRun"]:
+        """Every Detect run of this match, oldest first."""
+        return [run for run in self.runs if run.stage is ModelRunStage.DETECT]
+
+    @property
+    def complete_detect_run(self) -> "ModelRun | None":
+        """The newest Detect run that reached the end of its steady part."""
+        complete = [run for run in self.detect_runs if run.completed_at is not None]
+        return complete[-1] if complete else None
+
+    @property
+    def unfinished_detect_run(self) -> "ModelRun | None":
+        """The newest Detect run that has not finished, which a players job continues."""
+        unfinished = [run for run in self.detect_runs if run.completed_at is None]
+        return unfinished[-1] if unfinished else None
+
+    @property
+    def calibration_starts_players_job(self) -> bool:
+        """Whether saving a calibration now queues a players job.
+
+        Only for a match Detect has never run on, and with no job active. A
+        recalibration never re-detects (ADR 0001); an unfinished Detect run is
+        continued through `players_job_refusal` instead.
+        """
+        return self.active_job is None and not self.detect_runs
+
+    def players_job_refusal(self) -> PlayersJobRefusal | None:
+        """Why a players job may not start, or None if it may.
+
+        It may for a calibrated match with no active job whose Detect has not
+        finished: one that never ran, or one a failed job left unfinished.
+        """
+        if self.latest_calibration is None:
+            return PlayersJobRefusal.NO_CALIBRATION
+        if self.active_job is not None:
+            return PlayersJobRefusal.JOB_ACTIVE
+        if self.complete_detect_run is not None:
+            return PlayersJobRefusal.ALREADY_DETECTED
+        return None
+
+    @property
+    def can_start_players_job(self) -> bool:
+        return self.players_job_refusal() is None
 
 
 @dataclass(frozen=True)
@@ -606,6 +682,14 @@ class ModelRun(Base):
     match: Mapped[Match] = relationship(back_populates="runs", foreign_keys=[match_id])
     parent_run: Mapped["ModelRun | None"] = relationship(remote_side=[id])
     calibration: Mapped[CourtCalibration] = relationship()
+    #: A Detect run's output, in order. Empty for an Identify run, whose output
+    #: is its single artifact.
+    chunks: Mapped[list["ModelRunChunk"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ModelRunChunk.index",
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -664,6 +748,42 @@ class ModelRun(Base):
         return run
 
 
+class ModelRunChunk(Base):
+    """One finished stretch of a Detect run's output: a Parquet object in storage.
+
+    A Detect run over a whole match takes about an hour, so it saves its output
+    a chunk of video at a time, each committed before the next one starts. A
+    retry finds the first unfinished chunk from these rows. A chunk's object and
+    its row are committed together, and never changed afterwards.
+    """
+
+    __tablename__ = "model_run_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "model_runs.id", ondelete="CASCADE", name="fk_model_run_chunks_run_id_model_runs"
+        )
+    )
+    #: 0 for the chunk that starts the run's steady part, then 1, 2, ...
+    index: Mapped[int] = mapped_column(Integer)
+    #: The stretch of video it covers, in seconds from the start of the video.
+    start_seconds: Mapped[float] = mapped_column(Float)
+    end_seconds: Mapped[float] = mapped_column(Float)
+    storage_key: Mapped[str] = mapped_column(String(512), unique=True)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    run: Mapped[ModelRun] = relationship(back_populates="chunks")
+
+    __table_args__ = (
+        CheckConstraint('"index" >= 0', name="ck_model_run_chunks_index_non_negative"),
+        CheckConstraint(
+            "end_seconds >= start_seconds", name="ck_model_run_chunks_end_after_start"
+        ),
+        UniqueConstraint("run_id", "index", name="uq_model_run_chunks_run_id_index"),
+    )
+
+
 class AnalysisJob(Base):
     """One attempt at processing a match's video, and how far it got.
 
@@ -678,6 +798,11 @@ class AnalysisJob(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     match_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("matches.id", ondelete="CASCADE", name="fk_analysis_jobs_match_id_matches")
+    )
+    kind: Mapped[JobKind] = mapped_column(
+        _enum_column(JobKind, "job_kind"),
+        default=JobKind.PREPARATION,
+        server_default=JobKind.PREPARATION.value,
     )
     status: Mapped[JobStatus] = mapped_column(
         _enum_column(JobStatus, "job_status"), default=JobStatus.QUEUED

@@ -10,9 +10,12 @@ back through `running`. `ready` therefore has no outgoing moves at all, and the
 worker treats a refused transition as "somebody else already finished this"
 rather than as an error to report.
 
-A job also drives its match's status, and only here: `transition` is the one
-place a job's status changes, so it is the one place that can keep
-`Match.status` from contradicting the job it summarizes.
+A preparation job also drives its match's status, and only here: `transition`
+is the one place a job's status changes, so it is the one place that can keep
+`Match.status` from contradicting the job it summarizes. A players job never
+moves the match: it runs on a calibrated match, which stays `court_ready`
+whether tracking is queued, running, finished or failed. Its progress and
+outcome live on the job.
 """
 
 import logging
@@ -25,6 +28,7 @@ from sqlalchemy.orm import Session, selectinload
 from pickleball_api.errors import JOB_ERROR_MESSAGES, JobErrorCode
 from pickleball_api.models import (
     AnalysisJob,
+    JobKind,
     JobStage,
     JobStatus,
     Match,
@@ -124,7 +128,7 @@ def _sync_match_status(job: AnalysisJob) -> None:
     a unit test) has nothing to update.
     """
     match = job.match
-    if match is None:
+    if match is None or job.kind is JobKind.PLAYERS:
         return
     target = MATCH_STATUS_FOR_JOB[job.status]
     if target is MatchStatus.CALIBRATION_REQUIRED and match.status is MatchStatus.COURT_READY:
@@ -132,13 +136,15 @@ def _sync_match_status(job: AnalysisJob) -> None:
     match.status = target
 
 
-def new_job(match: Match) -> AnalysisJob:
+def new_job(match: Match, kind: JobKind = JobKind.PREPARATION) -> AnalysisJob:
     """A fresh queued job for `match`, with the match's status to match.
 
     Earlier jobs are left exactly as they were: every attempt stays in the
-    match's history. The caller commits, then enqueues.
+    match's history. The caller commits, then enqueues. A players job starts
+    at `court_ready`, the stage its match has already reached.
     """
-    job = AnalysisJob(match=match, status=JobStatus.QUEUED, stage=JobStage.INGESTED, progress=0.0)
+    stage = JobStage.COURT_READY if kind is JobKind.PLAYERS else JobStage.INGESTED
+    job = AnalysisJob(match=match, kind=kind, status=JobStatus.QUEUED, stage=stage, progress=0.0)
     _sync_match_status(job)
     return job
 
@@ -170,6 +176,7 @@ def get_match(session: Session, match_id: UUID) -> Match | None:
             selectinload(Match.jobs),
             selectinload(Match.reference_frames),
             selectinload(Match.calibrations),
+            selectinload(Match.runs),
         )
         .where(Match.id == match_id)
     )

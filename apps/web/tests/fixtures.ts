@@ -19,6 +19,7 @@ import type {
 export const JOB_QUEUED: Job = {
   id: "4fc1f817-fe2d-4279-a0be-87125fd6c733",
   match_id: "7c0d8e0a-3b5e-4f7e-9a51-2f1f3c9d6b21",
+  kind: "preparation",
   status: "queued",
   stage: "ingested",
   progress: 0,
@@ -93,6 +94,7 @@ export const MATCH_DETAIL: MatchDetail = {
   can_extract_metadata: false,
   can_extract_reference_frames: false,
   can_calibrate: false,
+  can_start_players_job: false,
   reference_frames: [],
   calibration: null,
 };

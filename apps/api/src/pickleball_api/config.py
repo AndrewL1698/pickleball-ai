@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     redis_url: SecretStr = SecretStr("redis://localhost:6379/0")
     queue_name: str = "analysis"
     job_timeout_seconds: int = Field(default=3600, gt=0)
+    #: Player tracking runs about as long as the match: `gold` (78.6 min) took about an hour.
+    players_job_timeout_seconds: int = Field(default=4 * 3600, gt=0)
+    #: The person detector the worker's players jobs load. Relative to the worker's
+    #: working directory, like `upload_dir`.
+    player_model_path: Path = Path("weights/yolo26m.pt")
 
     upload_dir: Path = Path("data/uploads")
     max_upload_bytes: int = Field(default=2048 * MEGABYTE, gt=0)

@@ -33,9 +33,10 @@ class QueueUnavailable(Exception):
 class JobQueue(Protocol):
     """Somewhere to put a job id for a worker to pick up."""
 
-    def enqueue(self, job_id: UUID) -> str:
+    def enqueue(self, job_id: UUID, *, timeout_seconds: int | None = None) -> str:
         """Queue the job and return the queue's own message id.
 
+        `timeout_seconds` overrides the queue's default time limit for this job.
         Raises `QueueUnavailable` if the job was not accepted.
         """
 
@@ -55,9 +56,9 @@ class RedisJobQueue:
         redis = Redis.from_url(settings.redis_url.get_secret_value())
         return cls(redis, settings.queue_name, settings.job_timeout_seconds)
 
-    def enqueue(self, job_id: UUID) -> str:
+    def enqueue(self, job_id: UUID, *, timeout_seconds: int | None = None) -> str:
         try:
-            enqueued = self._queue.enqueue(TASK_PATH, str(job_id))
+            enqueued = self._queue.enqueue(TASK_PATH, str(job_id), job_timeout=timeout_seconds)
         except Exception as exc:  # redis is down, or refused the job
             logger.exception("could not enqueue job %s", job_id)
             raise QueueUnavailable(str(job_id)) from exc
@@ -83,12 +84,15 @@ class RecordingJobQueue:
 
     def __init__(self, available: bool = True) -> None:
         self.enqueued: list[UUID] = []
+        #: The time limit each job was given; None for the queue's default.
+        self.timeouts: dict[UUID, int | None] = {}
         self.available = available
 
-    def enqueue(self, job_id: UUID) -> str:
+    def enqueue(self, job_id: UUID, *, timeout_seconds: int | None = None) -> str:
         if not self.available:
             raise QueueUnavailable(str(job_id))
         self.enqueued.append(job_id)
+        self.timeouts[job_id] = timeout_seconds
         return f"recorded-{job_id}"
 
     def ping(self) -> bool:

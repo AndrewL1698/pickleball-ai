@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from pickleball_api import jobs, uploads
 from pickleball_api.calibration import CalibrationRejected, fit_calibration
-from pickleball_api.config import MEGABYTE
+from pickleball_api.config import MEGABYTE, Settings
 from pickleball_api.dependencies import QueueDep, SessionDep, SettingsDep, StorageDep
 from pickleball_api.errors import JobErrorCode
 from pickleball_api.limits import content_length_of, too_large_message
@@ -24,11 +24,13 @@ from pickleball_api.models import (
     AnalysisJob,
     CalibrationRefusal,
     CourtCalibration,
+    JobKind,
     JobStage,
     JobStatus,
     Match,
     MatchStatus,
     MetadataJobRefusal,
+    PlayersJobRefusal,
     ReferenceFrame,
     ReferenceFrameJobRefusal,
     Video,
@@ -65,6 +67,12 @@ REFERENCE_FRAME_REFUSAL_MESSAGES: dict[ReferenceFrameJobRefusal, str] = {
 CALIBRATION_REFUSAL_MESSAGES: dict[CalibrationRefusal, str] = {
     CalibrationRefusal.NO_REFERENCE_FRAMES: "This match has no calibration images yet.",
     CalibrationRefusal.JOB_ACTIVE: REFUSAL_MESSAGES[MetadataJobRefusal.JOB_ACTIVE],
+}
+
+PLAYERS_JOB_REFUSAL_MESSAGES: dict[PlayersJobRefusal, str] = {
+    PlayersJobRefusal.NO_CALIBRATION: "This match's court has not been calibrated yet.",
+    PlayersJobRefusal.JOB_ACTIVE: REFUSAL_MESSAGES[MetadataJobRefusal.JOB_ACTIVE],
+    PlayersJobRefusal.ALREADY_DETECTED: "This match's players have already been detected.",
 }
 
 #: A frame is written once and never changes, and its id is random.
@@ -161,6 +169,7 @@ def create_match(
     _enqueue_committed(
         session,
         queue,
+        settings,
         job,
         failure="The match was created and its video stored, but it could not be queued "
         "for processing.",
@@ -180,7 +189,7 @@ def create_match(
     responses={409: {"description": "Metadata already extracted, or a job is active"}},
 )
 def start_metadata_job(
-    session: SessionDep, queue: QueueDep, match_id: UUID
+    session: SessionDep, queue: QueueDep, settings: SettingsDep, match_id: UUID
 ) -> MatchDetail:
     """Queue a metadata extraction job for a match that has no metadata.
 
@@ -197,7 +206,7 @@ def start_metadata_job(
     refusal = match.metadata_job_refusal()
     if refusal is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=REFUSAL_MESSAGES[refusal])
-    return _start_job(session, queue, match)
+    return _start_job(session, queue, settings, match)
 
 
 @router.post(
@@ -207,7 +216,7 @@ def start_metadata_job(
     responses={409: {"description": "No metadata yet, images already exist, or a job is active"}},
 )
 def start_reference_frame_job(
-    session: SessionDep, queue: QueueDep, match_id: UUID
+    session: SessionDep, queue: QueueDep, settings: SettingsDep, match_id: UUID
 ) -> MatchDetail:
     """Queue a job to make calibration images for a match that has none.
 
@@ -221,7 +230,33 @@ def start_reference_frame_job(
         raise HTTPException(
             status.HTTP_409_CONFLICT, detail=REFERENCE_FRAME_REFUSAL_MESSAGES[refusal]
         )
-    return _start_job(session, queue, match)
+    return _start_job(session, queue, settings, match)
+
+
+@router.post(
+    "/{match_id}/players-jobs",
+    response_model=MatchDetail,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={409: {"description": "Not calibrated, a job is active, or Detect has finished"}},
+)
+def start_players_job(
+    session: SessionDep, queue: QueueDep, settings: SettingsDep, match_id: UUID
+) -> MatchDetail:
+    """Queue player tracking for a calibrated match whose Detect has not finished.
+
+    Saving a calibration queues the first players job by itself. This is for a
+    match whose players job failed or could not be queued: the new job continues
+    the match's unfinished Detect run, with that run's own calibration and
+    configuration, from its first unfinished chunk. Refused with `409` without a
+    calibration, while any job is active, or once Detect has finished, since a
+    recalibration never re-detects (ADR 0001). Concurrency works as it does for
+    `start_metadata_job`.
+    """
+    match = _lock_match(session, match_id)
+    refusal = match.players_job_refusal()
+    if refusal is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=PLAYERS_JOB_REFUSAL_MESSAGES[refusal])
+    return _start_job(session, queue, settings, match, JobKind.PLAYERS)
 
 
 @router.get(
@@ -260,13 +295,23 @@ def read_reference_frame(
     },
 )
 def create_calibration(
-    session: SessionDep, match_id: UUID, body: CalibrationCreate
+    session: SessionDep,
+    queue: QueueDep,
+    settings: SettingsDep,
+    match_id: UUID,
+    body: CalibrationCreate,
 ) -> MatchDetail:
     """Fit a homography to landmarks placed on a reference frame, and save it.
 
     A homography over a dozen points takes no meaningful time, so this runs in
     the request and the answer comes straight back. An earlier calibration is
     kept: the newest is the one in force.
+
+    The first calibration of a match queues its players job, committed with the
+    calibration. Nothing else is queued: not while a job is active, and never
+    once Detect has run, finished or not (ADR 0001). A queue that is down fails
+    that job, but the calibration still stands and the answer is still `201`:
+    `can_start_players_job` then offers the retry.
     """
     match = _lock_match(session, match_id)
     refusal = match.calibration_refusal()
@@ -303,7 +348,14 @@ def create_calibration(
         )
     )
     match.status = MatchStatus.COURT_READY
+    job = None
+    if match.calibration_starts_players_job:
+        job = jobs.new_job(match, JobKind.PLAYERS)
+        # SQLAlchemy 2 does not cascade a new object into the session through a backref.
+        session.add(job)
     session.commit()
+    if job is not None:
+        _try_enqueue(session, queue, settings, job)
     return MatchDetail.of(match)
 
 
@@ -315,9 +367,15 @@ def _lock_match(session: Session, match_id: UUID) -> Match:
     return match
 
 
-def _start_job(session: Session, queue: JobQueue, match: Match) -> MatchDetail:
+def _start_job(
+    session: Session,
+    queue: JobQueue,
+    settings: Settings,
+    match: Match,
+    kind: JobKind = JobKind.PREPARATION,
+) -> MatchDetail:
     """Commit a new job for a match that has been checked, then queue it."""
-    job = jobs.new_job(match)
+    job = jobs.new_job(match, kind)
     session.add(job)
     try:
         session.commit()
@@ -331,6 +389,7 @@ def _start_job(session: Session, queue: JobQueue, match: Match) -> MatchDetail:
     _enqueue_committed(
         session,
         queue,
+        settings,
         job,
         failure="The job was recorded but could not be queued for processing.",
     )
@@ -338,7 +397,7 @@ def _start_job(session: Session, queue: JobQueue, match: Match) -> MatchDetail:
 
 
 def _enqueue_committed(
-    session: Session, queue: JobQueue, job: AnalysisJob, *, failure: str
+    session: Session, queue: JobQueue, settings: Settings, job: AnalysisJob, *, failure: str
 ) -> None:
     """Hand a committed job to the worker, or fail it visibly.
 
@@ -348,14 +407,28 @@ def _enqueue_committed(
     failed rather than left in `queued`, which would claim a worker has it, and
     the transition fails the match with it. The response is a fixed sentence.
     """
+    if not _try_enqueue(session, queue, settings, job):
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=failure)
+
+
+def _try_enqueue(session: Session, queue: JobQueue, settings: Settings, job: AnalysisJob) -> bool:
+    """Hand a committed job to the worker, or fail it with `enqueue_failed`.
+
+    A players job gets its own, longer time limit: tracking runs about as long
+    as the match.
+    """
     if session.in_transaction():  # pragma: no cover - guards an ordering mistake
         raise RuntimeError("the job must be committed before it is enqueued")
     try:
-        queue.enqueue(job.id)
+        if job.kind is JobKind.PLAYERS:
+            queue.enqueue(job.id, timeout_seconds=settings.players_job_timeout_seconds)
+        else:
+            queue.enqueue(job.id)
     except QueueUnavailable:
         jobs.transition(job, JobStatus.FAILED, error_code=JobErrorCode.ENQUEUE_FAILED)
         session.commit()
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=failure) from None
+        return False
+    return True
 
 
 @router.get("", response_model=MatchList)
