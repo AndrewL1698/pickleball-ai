@@ -41,7 +41,7 @@ def test_variable_frame_rate_keeps_the_first_frame_at_or_after_each_tick() -> No
 
 
 @pytest.mark.parametrize("fps", [30.0, 60.0])
-def test_detections_per_second_do_not_depend_on_the_frame_rate(
+def test_sampled_frames_per_second_do_not_depend_on_the_frame_rate(
     tmp_path: Path, fps: float
 ) -> None:
     seconds = 3

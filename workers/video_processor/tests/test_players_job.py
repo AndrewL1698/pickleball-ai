@@ -408,7 +408,7 @@ def test_a_worker_without_tracking_fails_the_job_with_a_clear_code(
     assert match_status(match_id) is MatchStatus.COURT_READY
 
 
-def test_the_default_stage_without_a_model_file_fails_with_that_code(
+def test_the_default_setup_without_a_model_file_fails_with_that_code(
     make_match: Callable[..., uuid.UUID], storage: LocalFileStorage, tmp_path: Path
 ) -> None:
     """The real loader, which refuses before it would import torch."""
