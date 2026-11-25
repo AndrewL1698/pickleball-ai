@@ -166,38 +166,49 @@ belongs to the camera, and a background comes from no single frame.
 ```text
 id
 match_id
-team                 # A / B, a persistent team identity
+team                 # A / B, a persistent team identity; A is the near team when the match starts
+number               # 1-4: 1-2 are team A, 3-4 team B; unique within a match
 name                 # optional user-assigned name
-is_user
+is_user              # not yet: no User table exists
 ```
+
+The first Identify run of a match creates all four; later runs reuse them. Within a
+team, the lower number is the partner in their own left slot at the first frame both
+are resolved (or the one seen first, if they never are), so re-running Identify keeps
+the numbers.
 
 Do not store court side or slot (near-left, far-right, ...) on `Player`. Teams switch ends between games and partners swap left/right during play, so side and slot are derived per frame from court coordinates.
 
 ## PlayerTrackPoint
 
-Stored as a Parquet artifact per model run (one row per player per frame), not as SQL rows. Four players at 30 fps for an hour is about 430k rows per match.
+Stored as the Parquet artifact of an Identify model run (one row per player per sampled frame), not as SQL rows. Four players at 15 samples a second for an hour is about 216k rows per match. `match_id` and `model_run_id` are not columns: every row of an artifact belongs to its run, and so to the run's match.
 
 ```text
-match_id
-model_run_id
 frame_number
 timestamp_ms
-track_id             # raw tracker ID
+player_number        # 1-4; the match's Player is found by (match_id, number)
+team                 # A / B, the player's team
+side                 # near / far at this frame
+slot                 # side + left / right from the player's own point of view (near_left, far_right, ...)
+track_id             # raw tracker ID, unique within the Detect run (chunk * 1,000,000 + ByteTrack's id)
 segment_id           # track split where position, box size, or clothing color jumps
-player_id            # nullable until identity is resolved
-identity_confident   # false when the alternative partner assignment was nearly as good
-image_x              # ground-contact point
+tracklet_id          # segment cut where another segment on the same half starts or ends
+x1                   # box, image pixels
+y1
+x2
+y2
+confidence           # detector score
+image_x              # ground-contact point, image pixels, as Detect stored it
 image_y
-bbox_x1
-bbox_y1
-bbox_x2
-bbox_y2
-court_x
+court_x              # ground-contact point projected with the run's calibration, feet
 court_y
-confidence
+truncated            # box cut off by the bottom of the frame: the position is unreliable
+identity_confident   # false when the partner assignment, or the link across a changeover, was nearly a coin flip
+identity_margin      # cost gap of the partner assignment to the best alternative
+switch_link_margin   # weakest changeover link this player was carried through (inf before the first)
 ```
 
-Keep raw tracker output (`track_id`) and resolved identity (`player_id`) separate, so identity logic can be rerun without re-detecting.
+Keep raw tracker output (`track_id`) and resolved identity (`player_number`) separate, so identity logic can be rerun without re-detecting. A frame where a player was not found has no row for them.
 
 ## BallTrackPoint
 
