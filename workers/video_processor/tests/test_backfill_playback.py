@@ -142,3 +142,43 @@ def test_the_command_fails_when_a_copy_could_not_be_made(
     monkeypatch.setattr(playback, "ffmpeg_exe", lambda: str(tmp_path / "no-such-ffmpeg"))
     assert main([]) == 1
     assert copy_of(processed.id) is None
+
+
+def test_a_video_deleted_while_encoding_loses_its_copy(
+    processed: Video, storage: LocalFileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    made: list[str] = []
+    real = backfill_playback.make_playback_copy
+
+    def deleting(*args: object, **kwargs: object) -> str:
+        key = real(*args, **kwargs)  # type: ignore[arg-type]
+        made.append(key)
+        with db.session_scope() as session:
+            match = session.get(Match, processed.match_id)
+            assert match is not None
+            session.delete(match)
+        return key
+
+    monkeypatch.setattr(backfill_playback, "make_playback_copy", deleting)
+    assert backfill(storage) == BackfillSummary(video_gone=1)
+    assert made and not storage.exists(made[0])
+
+
+def test_an_error_saving_a_copy_deletes_it_stops_the_run_and_still_logs_a_summary(
+    processed: Video,
+    storage: LocalFileStorage,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def database_gone(video_id: object, key: str) -> None:
+        raise ConnectionError("database went away")
+
+    monkeypatch.setattr(backfill_playback, "_save", database_gone)
+    # The migration the fixtures run calls `fileConfig`, which disables every
+    # logger that already exists, this module's included.
+    monkeypatch.setattr(backfill_playback.logger, "disabled", False)
+    with caplog.at_level("INFO"), pytest.raises(ConnectionError):
+        backfill(storage)
+    assert [p.name for p in storage.root.iterdir()] == [processed.storage_key]
+    assert copy_of(processed.id) is None
+    assert any(record.getMessage().startswith("done: 0 made") for record in caplog.records)

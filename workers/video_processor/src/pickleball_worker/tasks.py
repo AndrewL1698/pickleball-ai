@@ -89,7 +89,7 @@ def run_analysis_job(
         return None
 
     try:
-        unused = _complete(identifier, result)
+        left_over = _complete(identifier, result)
     except Exception:
         # The result could not be saved -- a constraint refused it, or the
         # database went away. The transaction rolled back, so the job is still
@@ -98,10 +98,10 @@ def run_analysis_job(
         _discard_files(storage, result.stored_keys)
         finish_job(identifier, JobStatus.FAILED, error_code=JobErrorCode.INTERNAL)
         return None
-    if unused is None:
+    if left_over is None:  # not this attempt's to finish: nothing was saved
         _discard_files(storage, result.stored_keys)
         return None
-    _discard_files(storage, unused)
+    _discard_files(storage, left_over)
     logger.info("job %s ready: %s", identifier, result.summary)
     return result.summary
 

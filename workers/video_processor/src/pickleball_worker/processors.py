@@ -48,9 +48,10 @@ BACKGROUND_SAMPLES = 25
 SAMPLE_STILLS = 3
 
 #: How far through the job each step ends. The playback transcode is the slow
-#: part, so it gets most of the bar, from the stills to 0.95.
+#: part, so it gets most of the bar, from the stills to `PLAYBACK_DONE`.
 SAMPLES_DONE = 0.4
 STILLS_DONE = 0.45
+PLAYBACK_DONE = 0.95
 
 #: Far past any JPEG these can make; the limit is only there because `write` asks.
 MAX_STILL_BYTES = 64 * 1024 * 1024
@@ -240,7 +241,7 @@ class CalibrationPreparationProcessor:
             for still in stored:
                 storage.delete(still.storage_key)
             raise
-        report(JobStage.INGESTED, 0.95)
+        report(JobStage.INGESTED, PLAYBACK_DONE)
         return ProcessingResult(
             metadata=metadata,
             stills=tuple(stored),
@@ -298,7 +299,7 @@ def _playback_copy(
             height=metadata.height,
             duration_seconds=metadata.duration_seconds,
             report=lambda done: report(
-                JobStage.INGESTED, STILLS_DONE + (0.95 - STILLS_DONE) * done
+                JobStage.INGESTED, STILLS_DONE + (PLAYBACK_DONE - STILLS_DONE) * done
             ),
         )
     except PlaybackCopyFailed:

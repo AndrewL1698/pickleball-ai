@@ -115,7 +115,7 @@ by importing the function, so the edge really does point one way.
 | `POST` | `/api/matches/{match_id}/metadata-jobs` | Queue a job for a match with no metadata. `202` with the match; `409` if refused; `503` if it cannot be queued |
 | `POST` | `/api/matches/{match_id}/reference-frame-jobs` | Queue a job for a match with metadata but no calibration images. Answers as above |
 | `GET` | `/api/matches/{match_id}/reference-frames/{frame_id}` | One calibration image, as `image/jpeg`. `404` if unknown, under another match, or gone from storage |
-| `GET` | `/api/matches/{match_id}/playback` | The H.264 playback copy, as `video/mp4`, with range requests (`206`, or `416` for a range past the end). `404` if the match is unknown, has no copy yet, or the copy is gone from storage |
+| `GET` | `/api/matches/{match_id}/playback` | The H.264 playback copy, as `video/mp4`, with range requests (`206`, or `416` for a range past the end; Starlette answers `416` and a malformed `400` in plain text, not the error shape below). `404` if the match is unknown, has no copy yet, or the copy is gone from storage |
 | `POST` | `/api/matches/{match_id}/calibrations` | Fit and save a calibration, and queue a players job for a match never detected. `201` with the match; `409` if refused; `422` with a sentence if the landmarks cannot make a court |
 | `POST` | `/api/matches/{match_id}/players-jobs` | Queue a players job that continues an unfinished Detect run, or starts one. `202` with the match; `409` without a calibration, while a job is active, or once Detect has finished; `503` if it cannot be queued |
 | `GET` | `/api/jobs/{job_id}` | Status, stage, progress, timestamps, failure code, `match_id`. `404` if unknown |
@@ -204,6 +204,11 @@ checked: the video was processed before the check existed, a requested frame did
 decode, a pair of frames could not be compared, or the check itself failed (that is
 logged and does not fail the job). A move and back between two samples would not show.
 
+`video.playback_available` says whether `GET .../playback` has a copy to stream. It is
+false until the preparation job has made one, and stays false if the transcode failed
+(that is logged and does not fail the job) until `pbworker-backfill-playback` retries
+it. The response never names where the copy is stored.
+
 `MatchSummary` (each item of `GET /api/matches`) is the same without `jobs`, the
 `can_*` flags, `reference_frames` and `calibration`.
 `video` is nullable in the schema because the database permits a match without
@@ -246,6 +251,7 @@ Six tables. `matches` is the parent:
 | `codec` | FourCC, `VARCHAR(32)`. Nullable even once decoded |
 | `metadata_extracted_at` | Null until decoded. A CHECK requires every decoded field to be present with it, and absent without it |
 | `camera_jumps` | JSON, nullable. Where sampled frames show the camera moved. Empty means none found, and null means not checked |
+| `playback_storage_key` | `VARCHAR(512)`, nullable, unique. The H.264 playback copy. Null until made, and after a failed transcode. Never in a response |
 
 `analysis_jobs`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `kind` (`preparation` or
 `players`, default `preparation`), `status`, `stage`,
@@ -748,6 +754,13 @@ Nothing is queued: an already calibrated match gets player tracking from
 
 Adds `model_run_chunks`. Existing runs have none. Downgrading forgets them, and their
 objects stay in storage until something removes them.
+
+### Migration 0011: playback copy
+
+Adds nullable, unique `videos.playback_storage_key` in batch mode, as 0007 did; no table
+references `videos`, so rebuilding it on SQLite cascades nothing. It makes no copies and
+enqueues nothing: `uv run pbworker-backfill-playback` makes them for existing videos.
+Downgrading forgets the keys, and the copies stay in storage until something removes them.
 
 ## Dependencies and Processes
 
