@@ -54,6 +54,26 @@ def detect_run(session: Session, match: Match, *, complete: bool) -> ModelRun:
     return run
 
 
+def identify_run(session: Session, match: Match, detect: ModelRun) -> ModelRun:
+    """A finished Identify run over all of `detect`, which the match shows."""
+    session.expire_all()
+    found = session.get(Match, match.id)
+    parent = session.get(ModelRun, detect.id)
+    assert found is not None and found.latest_calibration is not None and parent is not None
+    run = ModelRun.start(
+        found,
+        ModelRunStage.IDENTIFY,
+        calibration=found.latest_calibration,
+        model_version="pickleball_ml.players.identity@0.1.0",
+        config={"detect_chunks": len(parent.chunks)},
+        parent=parent,
+    )
+    run.completed_at = utcnow()
+    found.current_identify_run = run
+    session.commit()
+    return run
+
+
 def finish(session: Session, job_id: uuid.UUID, *statuses: JobStatus) -> None:
     session.expire_all()
     job = session.get(AnalysisJob, job_id)
@@ -244,16 +264,34 @@ def test_a_players_job_is_refused_while_a_job_is_active(
     assert "already queued or running" in response.json()["detail"]
 
 
-def test_a_players_job_is_refused_once_detect_has_finished(
+def test_a_players_job_is_refused_once_detect_has_finished_and_identify_has_run(
     client: TestClient, session: Session, storage: LocalFileStorage
 ) -> None:
     match = calibrated(client, session, storage)
     (job,) = players_jobs(session, match)
     finish(session, job.id, JobStatus.RUNNING, JobStatus.READY)
-    detect_run(session, match, complete=True)
+    identify_run(session, match, detect_run(session, match, complete=True))
+    assert client.get(f"/api/matches/{match.id}").json()["can_start_players_job"] is False
     response = client.post(f"/api/matches/{match.id}/players-jobs")
     assert response.status_code == 409
-    assert "already been detected" in response.json()["detail"]
+    assert "already been tracked" in response.json()["detail"]
+
+
+def test_a_finished_detect_run_with_no_identify_run_can_start_an_identify_only_job(
+    client: TestClient, session: Session, storage: LocalFileStorage, queue: RecordingJobQueue
+) -> None:
+    """Identify failed, or the worker died between Detect's last chunk and Identify:
+    the job skips Detect and runs Identify."""
+    match = calibrated(client, session, storage)
+    (first,) = players_jobs(session, match)
+    finish(session, first.id, JobStatus.RUNNING, JobStatus.FAILED)
+    detect_run(session, match, complete=True)
+    assert client.get(f"/api/matches/{match.id}").json()["can_start_players_job"] is True
+
+    response = client.post(f"/api/matches/{match.id}/players-jobs")
+    assert response.status_code == 202
+    assert response.json()["latest_job"]["kind"] == "players"
+    assert len(queue.enqueued) == 2
 
 
 def test_a_players_job_needs_a_match_that_exists(client: TestClient) -> None:

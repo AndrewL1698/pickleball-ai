@@ -208,7 +208,7 @@ def run_window(
         _run_track(experiment, window, outputs, runner, start_frame, end_frame, stride,
                    clip, metadata, progress_factory)
     if "identify" in stages:
-        _run_identify(experiment, window, outputs, runner, fps, stride, metadata)
+        _run_identify(experiment, window, outputs, runner, fps, metadata)
     if "ball" in stages:
         _run_ball(experiment, window, outputs, runner, fps, clip, progress_factory)
     if "render" in stages:
@@ -274,7 +274,7 @@ def _run_track(
 
 def _run_identify(
     experiment: Experiment, window: Window, outputs: Any, runner: StageRunner, fps: float,
-    stride: int, metadata: dict[str, Any],
+    metadata: dict[str, Any],
 ) -> StageResult:
     stage = "identify"
     if not outputs.detections_run.exists():
@@ -290,15 +290,15 @@ def _run_identify(
     def work() -> dict[str, Any]:
         import pandas as pd
 
+        from pickleball_ml.players.court_position import with_ground_contact
         from pickleball_ml.players.identity import IdentityConfig, resolve_identities, run_record
 
         config = IdentityConfig(
             **settings_for(IdentityConfig, experiment.tracking.get("identity", {})))
         switches = [to_frame(s, fps) for s in window.end_switches_s]
-        players, diagnostics = resolve_identities(
-            pd.read_parquet(outputs.detections_raw), fps, stride, int(metadata["height"]),
-            config, end_switch_frames=switches,
-        )
+        raw = with_ground_contact(pd.read_parquet(outputs.detections_raw),
+                                  int(metadata["height"]))
+        players, diagnostics = resolve_identities(raw, config, end_switch_frames=switches)
         players.to_parquet(outputs.players_court, index=False)
         record = run_record(config, players, diagnostics, detections_run["frames_processed"])
         record["end_switch_frames"] = switches

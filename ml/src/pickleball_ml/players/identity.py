@@ -34,6 +34,18 @@ and which partner is which is decided by clothing color plus any tracker IDs
 that survived the changeover. Player identity and team (A/B) persist across the
 window; side (near/far) and slot are per frame.
 
+Numbering follows a rule, so the same input always gives the same numbers: team
+A (players 1-2) is the near team of the first game segment, and within a team the
+partner in their own left slot, at the first frame both partners are resolved,
+is the lower number (1 or 3). Partners never resolved at the same time are
+numbered by who was seen first. Left and right are each player's own, facing the
+net from their baseline: a far player faces the camera, so their left is court +X.
+
+Detect samples frames by time, so the gap between two samples varies (2 frames at
+30 fps; 4 or 5 at 59.94 fps). Everything here that asks for "the next sample"
+counts samples (`sample`, the rank of a row's frame among the input's frames),
+and everything that asks "how long" uses `timestamp_ms`, never a fixed stride.
+
 Confidence has two parts, because they fail independently. `identity_margin` is
 the cost gap of the partner assignment inside a segment. `switch_link_margin`
 is the gap between the chosen cross-switch pairing and the alternative, which
@@ -58,6 +70,12 @@ COST_SCALE = 100  # network simplex needs integer costs
 SIDES = ("near", "far")
 INF = float("inf")
 
+#: Columns `resolve_identities` reads.
+INPUT_COLUMNS = [
+    "frame_number", "timestamp_ms", "track_id", "x1", "y1", "x2", "y2", "confidence",
+    "image_x", "image_y", "court_x", "court_y", "truncated", "appearance",
+]
+
 
 @dataclass(frozen=True)
 class IdentityConfig:
@@ -77,6 +95,7 @@ class IdentityConfig:
     appearance_change_window: int = 15  # rows averaged on each side of a candidate split
     appearance_change_threshold: float = 0.45  # ~99.5th percentile within tracks on test clip
     max_gap_s: float = 30.0
+    # In samples, not video frames: how far one tracklet may overlap the next in a chain.
     max_overlap_frames: int = 2
     # Selection: frames inside this area earn full reward; outside it people are rarely players.
     reward_area: PlayArea = field(default_factory=lambda: PlayArea(4.0, 10.0, 5.0))
@@ -109,6 +128,11 @@ class Tracklet:
     side: str
     start_frame: int
     end_frame: int
+    #: Positions of the first and last rows among the input's samples (`sample`).
+    start_sample: int
+    end_sample: int
+    start_s: float
+    end_s: float
     frames: int
     start_xy: tuple[float, float]
     end_xy: tuple[float, float]
@@ -116,17 +140,21 @@ class Tracklet:
     reward: float
 
 
-def split_tracklets(
-    detections: pd.DataFrame, source_fps: float, stride: int, config: IdentityConfig
-) -> pd.DataFrame:
-    """Tracked rows with smoothed court position, `segment_id`, and `tracklet_id` columns."""
+def split_tracklets(detections: pd.DataFrame, config: IdentityConfig) -> pd.DataFrame:
+    """Tracked rows with smoothed court position, `sample`, `segment_id`, and `tracklet_id`.
+
+    `sample` numbers the distinct frames of `detections` in order, so the sample
+    after a row's is always `sample + 1`, whatever the frame gap.
+    """
+    detections = detections.assign(sample=_sample_index(detections))
     tracked = detections[detections["track_id"] >= 0]
     aspect = (tracked["y2"] - tracked["y1"]) / (tracked["x2"] - tracked["x1"]).replace(0, np.nan)
     rows = tracked[aspect >= config.min_box_aspect].sort_values(["track_id", "frame_number"])
     rows = rows.reset_index(drop=True)
     if rows.empty:
         return rows.assign(smooth_x=pd.Series(dtype=float), smooth_y=pd.Series(dtype=float),
-                           segment_id=pd.Series(dtype=int), tracklet_id=pd.Series(dtype=int))
+                           segment_id=pd.Series(dtype=np.int64),
+                           tracklet_id=pd.Series(dtype=np.int64))
 
     by_track = rows.groupby("track_id")
     window = config.smoothing_frames
@@ -135,7 +163,7 @@ def split_tracklets(
             lambda s: s.rolling(window, center=True, min_periods=1).median()
         )
     height = rows["y2"] - rows["y1"]
-    dt = by_track["frame_number"].diff() / source_fps
+    dt = by_track["timestamp_ms"].diff() / 1000.0
     step = np.hypot(by_track["smooth_x"].diff(), by_track["smooth_y"].diff())
     noise = np.where(rows["smooth_y"] > 0, config.far_position_noise_ft,
                      config.near_position_noise_ft)
@@ -147,8 +175,21 @@ def split_tracklets(
     new_segment = dt.isna() | position_jump | size_jump | color_change
     segment = new_segment.astype(int).groupby(rows["track_id"]).cumsum()
     rows["segment_id"] = pd.factorize(pd.MultiIndex.from_arrays([rows["track_id"], segment]))[0]
-    rows["tracklet_id"] = _cut_at_side_boundaries(rows, stride)
+    rows["tracklet_id"] = _cut_at_side_boundaries(rows)
     return rows
+
+
+def _sample_index(detections: pd.DataFrame) -> pd.Series:
+    """0, 1, 2, ... for the distinct frame numbers of `detections`, in order."""
+    frames = detections["frame_number"].to_numpy()
+    return pd.Series(np.searchsorted(np.unique(frames), frames).astype(np.int64),
+                     index=detections.index)
+
+
+def sample_period_s(detections: pd.DataFrame) -> float:
+    """The typical time between two samples of `detections` (0 with fewer than two)."""
+    times = np.unique(detections["timestamp_ms"].to_numpy(dtype=np.float64))
+    return float(np.median(np.diff(times))) / 1000.0 if len(times) > 1 else 0.0
 
 
 def _appearance_change_points(rows: pd.DataFrame, window: int, threshold: float) -> pd.Series:
@@ -176,18 +217,19 @@ def _appearance_change_points(rows: pd.DataFrame, window: int, threshold: float)
     return pd.Series(change, index=rows.index)
 
 
-def _cut_at_side_boundaries(rows: pd.DataFrame, stride: int) -> pd.Series:
+def _cut_at_side_boundaries(rows: pd.DataFrame) -> pd.Series:
     """Tracklet ids: segments cut wherever another segment on the same half starts or ends."""
     by_segment = rows.groupby("segment_id")
     side = np.sign(by_segment["smooth_y"].transform("median")).to_numpy()
-    start = by_segment["frame_number"].transform("min").to_numpy()
-    end = by_segment["frame_number"].transform("max").to_numpy()
-    frames = rows["frame_number"].to_numpy()
+    start = by_segment["sample"].transform("min").to_numpy()
+    end = by_segment["sample"].transform("max").to_numpy()
+    samples = rows["sample"].to_numpy()
     piece = np.zeros(len(rows), dtype=np.int64)
     for half in np.unique(side):
         members = side == half
-        boundaries = np.unique(np.concatenate([start[members], end[members] + stride]))
-        piece[members] = (np.searchsorted(boundaries, frames[members], side="right")
+        # A segment that ends cuts the others at the sample after its last one.
+        boundaries = np.unique(np.concatenate([start[members], end[members] + 1]))
+        piece[members] = (np.searchsorted(boundaries, samples[members], side="right")
                           - np.searchsorted(boundaries, start[members], side="right"))
     keys = pd.MultiIndex.from_arrays([rows["segment_id"], piece])
     return pd.Series(pd.factorize(keys)[0], index=rows.index)
@@ -196,7 +238,7 @@ def _cut_at_side_boundaries(rows: pd.DataFrame, stride: int) -> pd.Series:
 def summarize_tracklets(rows: pd.DataFrame, config: IdentityConfig) -> list[Tracklet]:
     tracklets = []
     for _, group in rows.groupby("tracklet_id", sort=True):
-        group = group.sort_values("frame_number")
+        group = group.sort_values("sample")
         xs = group["smooth_x"].to_numpy(dtype=float)
         ys = group["smooth_y"].to_numpy(dtype=float)
         ends = min(5, len(group))
@@ -210,6 +252,10 @@ def summarize_tracklets(rows: pd.DataFrame, config: IdentityConfig) -> list[Trac
             side="far" if float(np.median(ys)) > 0 else "near",
             start_frame=int(group["frame_number"].iloc[0]),
             end_frame=int(group["frame_number"].iloc[-1]),
+            start_sample=int(group["sample"].iloc[0]),
+            end_sample=int(group["sample"].iloc[-1]),
+            start_s=float(group["timestamp_ms"].iloc[0]) / 1000.0,
+            end_s=float(group["timestamp_ms"].iloc[-1]) / 1000.0,
             frames=len(group),
             start_xy=(float(np.median(xs[:ends])), float(np.median(ys[:ends]))),
             end_xy=(float(np.median(xs[-ends:])), float(np.median(ys[-ends:]))),
@@ -219,14 +265,17 @@ def summarize_tracklets(rows: pd.DataFrame, config: IdentityConfig) -> list[Trac
     return tracklets
 
 
-def motion(
-    a: Tracklet, b: Tracklet, source_fps: float, stride: int, config: IdentityConfig
-) -> float | None:
+def _gap_s(a: Tracklet, b: Tracklet, period_s: float) -> float:
+    """Time from the end of `a` to the start of `b`, and at least one sample period."""
+    return max(b.start_s - a.end_s, period_s)
+
+
+def motion(a: Tracklet, b: Tracklet, period_s: float, config: IdentityConfig) -> float | None:
     """Normalized displacement from the end of `a` to the start of `b`; None if impossible."""
-    gap_frames = b.start_frame - a.end_frame
-    if gap_frames <= 0 and -gap_frames > config.max_overlap_frames * stride:
+    gap_samples = b.start_sample - a.end_sample
+    if gap_samples <= 0 and -gap_samples > config.max_overlap_frames:
         return None
-    gap_s = max(gap_frames, stride) / source_fps
+    gap_s = _gap_s(a, b, period_s)
     if gap_s > config.max_gap_s:
         return None
     distance = float(np.hypot(b.start_xy[0] - a.end_xy[0], b.start_xy[1] - a.end_xy[1]))
@@ -237,7 +286,7 @@ def motion(
 
 
 def select_players(
-    tracklets: list[Tracklet], source_fps: float, stride: int, config: IdentityConfig
+    tracklets: list[Tracklet], period_s: float, config: IdentityConfig
 ) -> list[Tracklet]:
     """Tracklets on one half chosen as players: max coverage minus link cost, at most
     `players_per_side` at a time (min-cost flow over tracklet chains)."""
@@ -246,22 +295,23 @@ def select_players(
     graph.add_node("S", demand=-k)
     graph.add_node("T", demand=k)
     graph.add_edge("S", "T", capacity=k, weight=0)
-    ordered = sorted(tracklets, key=lambda t: t.start_frame)
+    ordered = sorted(tracklets, key=lambda t: (t.start_sample, t.tracklet_id))
     for t in ordered:
         graph.add_edge("S", ("in", t.tracklet_id), capacity=1, weight=0)
         graph.add_edge(("in", t.tracklet_id), ("out", t.tracklet_id), capacity=1,
                        weight=-round(t.reward * COST_SCALE))
         graph.add_edge(("out", t.tracklet_id), "T", capacity=1, weight=0)
-    starts = np.array([t.start_frame for t in ordered])
+    starts = np.array([t.start_sample for t in ordered])
+    start_times = np.array([t.start_s for t in ordered])
     for a in ordered:
-        latest_start = a.end_frame + config.max_gap_s * source_fps
-        first = int(np.searchsorted(starts, a.start_frame, side="right"))
-        last = int(np.searchsorted(starts, latest_start, side="right"))
+        first = int(np.searchsorted(starts, a.start_sample, side="right"))
+        last = int(np.searchsorted(start_times, a.end_s + config.max_gap_s, side="right"))
         for b in ordered[first:last]:
             if a.segment_id == b.segment_id:
-                cost = 0.0 if b.start_frame - a.end_frame == stride else None
+                # The next piece of the same segment, from the very next sample.
+                cost = 0.0 if b.start_sample == a.end_sample + 1 else None
             else:
-                moved = motion(a, b, source_fps, stride, config)
+                moved = motion(a, b, period_s, config)
                 cost = None if moved is None else config.selection_motion_weight * moved
             if cost is not None:
                 graph.add_edge(("out", a.tracklet_id), ("in", b.tracklet_id), capacity=1,
@@ -273,7 +323,7 @@ def select_players(
 
 @dataclass(frozen=True)
 class _Interval:
-    """A stretch of time on one half during which the set of selected tracklets is fixed."""
+    """A stretch of samples on one half during which the set of selected tracklets is fixed."""
 
     tracklets: tuple[Tracklet, ...]
     frames: tuple[int, ...]  # rows of each tracklet inside this interval
@@ -287,16 +337,19 @@ class PartnerAssignment:
 
 
 def assign_partners(
-    selected: list[Tracklet], frames_by_tracklet: dict[int, np.ndarray], source_fps: float,
-    stride: int, config: IdentityConfig,
+    selected: list[Tracklet], samples_by_tracklet: dict[int, np.ndarray], period_s: float,
+    config: IdentityConfig,
 ) -> PartnerAssignment:
-    """Decide which of the two partners each selected tracklet on one half belongs to."""
-    intervals = _intervals(selected, frames_by_tracklet, stride)
+    """Decide which of the two partners each selected tracklet on one half belongs to.
+
+    `samples_by_tracklet` holds each tracklet's sorted `sample` values.
+    """
+    intervals = _intervals(selected, samples_by_tracklet)
     prototypes = _initial_prototypes(intervals)
     labels: dict[int, int] = {}
     margins: dict[int, float] = {}
     for _ in range(config.prototype_iterations):
-        new_labels, margins = _viterbi(intervals, prototypes, source_fps, stride, config)
+        new_labels, margins = _viterbi(intervals, prototypes, period_s, config)
         prototypes = _prototypes(selected, new_labels, prototypes)
         if new_labels == labels:
             break
@@ -305,16 +358,17 @@ def assign_partners(
 
 
 def _intervals(
-    selected: list[Tracklet], frames_by_tracklet: dict[int, np.ndarray], stride: int
+    selected: list[Tracklet], samples_by_tracklet: dict[int, np.ndarray]
 ) -> list[_Interval]:
-    bounds = sorted({t.start_frame for t in selected} | {t.end_frame + stride for t in selected})
+    """Intervals of samples, [start, end), each with a fixed set of selected tracklets."""
+    bounds = sorted({t.start_sample for t in selected} | {t.end_sample + 1 for t in selected})
     intervals = []
     for start, end in zip(bounds, bounds[1:], strict=False):
         active = []
         for t in selected:
-            if t.start_frame < end and t.end_frame >= start:
-                frames = frames_by_tracklet[t.tracklet_id]
-                count = int(np.searchsorted(frames, end) - np.searchsorted(frames, start))
+            if t.start_sample < end and t.end_sample >= start:
+                samples = samples_by_tracklet[t.tracklet_id]
+                count = int(np.searchsorted(samples, end) - np.searchsorted(samples, start))
                 active.append((count, t))
         active = sorted(active, key=lambda item: -item[0])[:2]
         intervals.append(_Interval(tuple(t for _, t in active), tuple(c for c, _ in active)))
@@ -370,7 +424,7 @@ def _emission(interval: _Interval, state: tuple[int, ...],
 
 def _transition(
     previous: _Interval, previous_state: tuple[int, ...], current: _Interval,
-    state: tuple[int, ...], source_fps: float, stride: int, config: IdentityConfig,
+    state: tuple[int, ...], period_s: float, config: IdentityConfig,
 ) -> float:
     label_of = {t.tracklet_id: label for t, label in zip(previous.tracklets, previous_state,
                                                            strict=True)}
@@ -383,7 +437,7 @@ def _transition(
             continue
         before = by_label.get(label)
         if before is not None and before.segment_id != t.segment_id:
-            cost += _assignment_motion_cost(before, t, source_fps, stride, config)
+            cost += _assignment_motion_cost(before, t, period_s, config)
         for other, other_label in zip(previous.tracklets, previous_state, strict=True):
             if other.segment_id == t.segment_id and other_label != label:
                 cost += config.segment_switch_cost
@@ -391,7 +445,7 @@ def _transition(
 
 
 def _assignment_motion_cost(
-    a: Tracklet, b: Tracklet, source_fps: float, stride: int, config: IdentityConfig
+    a: Tracklet, b: Tracklet, period_s: float, config: IdentityConfig
 ) -> float:
     """Cost of the same partner moving from the end of `a` to the start of `b`.
 
@@ -399,7 +453,7 @@ def _assignment_motion_cost(
     failure, or from a noisy far-court foot position), and a hard constraint there would make
     both partner choices infeasible.
     """
-    gap_s = max(b.start_frame - a.end_frame, stride) / source_fps
+    gap_s = _gap_s(a, b, period_s)
     distance = float(np.hypot(b.start_xy[0] - a.end_xy[0], b.start_xy[1] - a.end_xy[1]))
     noise = config.far_position_noise_ft if a.side == "far" else config.near_position_noise_ft
     normalized = distance / (noise + config.typical_speed_ft_s * gap_s)
@@ -407,8 +461,8 @@ def _assignment_motion_cost(
 
 
 def _viterbi(
-    intervals: list[_Interval], prototypes: list[Descriptor | None], source_fps: float,
-    stride: int, config: IdentityConfig,
+    intervals: list[_Interval], prototypes: list[Descriptor | None], period_s: float,
+    config: IdentityConfig,
 ) -> tuple[dict[int, int], dict[int, float]]:
     """Exact best partner labels over all intervals, plus per-tracklet confidence margins."""
     if not intervals:
@@ -417,7 +471,7 @@ def _viterbi(
     emissions = [[_emission(iv, s, prototypes) for s in ss] for iv, ss in
                  zip(intervals, states, strict=True)]
     transitions = [
-        [[_transition(intervals[i - 1], p, intervals[i], s, source_fps, stride, config)
+        [[_transition(intervals[i - 1], p, intervals[i], s, period_s, config)
           for s in states[i]] for p in states[i - 1]]
         for i in range(1, len(intervals))
     ]
@@ -464,21 +518,22 @@ PLAYER_COLUMNS = [
 
 
 def resolve_identities(
-    detections: pd.DataFrame, source_fps: float, stride: int, frame_height: int,
-    config: IdentityConfig, end_switch_frames: Sequence[int] = (),
+    detections: pd.DataFrame, config: IdentityConfig, end_switch_frames: Sequence[int] = (),
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Per-frame rows for the resolved players, and diagnostics.
 
-    `end_switch_frames` are frames where the teams have changed ends (a game
-    boundary). Player IDs 1-2 are team A, the near team at the start of the
-    window; 3-4 are team B.
+    `detections` has the `INPUT_COLUMNS`: boxes with their ground-contact point
+    in the image and on the court, and whether the box is cut off by the frame.
+    Rows with `track_id` -1 are ignored. `end_switch_frames` are frames where the
+    teams have changed ends (a game boundary). Player IDs 1-2 are team A, the near
+    team at the start of the window; 3-4 are team B.
     """
     bounds = _game_bounds(detections, end_switch_frames)
     games: list[tuple[pd.DataFrame, dict[str, Any], dict[int, Descriptor | None],
                       dict[int, set[int]]]] = []
     for start, end in bounds:
         in_game = (detections["frame_number"] >= start) & (detections["frame_number"] < end)
-        games.append(_resolve_game(detections[in_game], source_fps, stride, config))
+        games.append(_resolve_game(detections[in_game], config))
 
     diagnostics: dict[str, Any] = dict(games[0][1]) if len(games) == 1 else {
         "tracklets": sum(g[1]["tracklets"] for g in games),
@@ -528,9 +583,6 @@ def resolve_identities(
     players = pd.concat(parts, ignore_index=True)
     players["team"] = np.where(players["player_id"] <= config.players_per_side, "A", "B")
     players["identity_confident"] &= players["switch_link_margin"] >= config.switch_margin
-    players["image_x"] = (players["x1"] + players["x2"]) / 2.0
-    players["image_y"] = players["y2"]
-    players["truncated"] = players["y2"] >= frame_height - 2
     players["slot"] = _assign_slots(players)
     return (players[PLAYER_COLUMNS].sort_values(["frame_number", "player_id"])
             .reset_index(drop=True), diagnostics)
@@ -620,26 +672,24 @@ def _best_team_cost(mapping: dict[int, int], before: dict[int, Descriptor | None
 
 
 def _resolve_game(
-    detections: pd.DataFrame, source_fps: float, stride: int, config: IdentityConfig,
+    detections: pd.DataFrame, config: IdentityConfig,
 ) -> tuple[pd.DataFrame, dict[str, Any], dict[int, Descriptor | None], dict[int, set[int]]]:
     """Players of one game segment with local IDs (1-2 near, 3-4 far), diagnostics, a
     clothing prototype per local ID, and the tracker IDs each was built from."""
-    rows = split_tracklets(detections, source_fps, stride, config)
+    rows = split_tracklets(detections, config)
+    period_s = sample_period_s(detections)
     tracklets = summarize_tracklets(rows, config)
-    frames_by_tracklet = {cast(int, k): np.sort(g.to_numpy()) for k, g in
-                          rows.groupby("tracklet_id")["frame_number"]}
+    samples_by_tracklet = {cast(int, k): np.sort(g.to_numpy()) for k, g in
+                           rows.groupby("tracklet_id")["sample"]}
     player_of: dict[int, int] = {}
     margin_of: dict[int, float] = {}
     prototypes: dict[int, Descriptor | None] = {}
     diagnostics: dict[str, Any] = {"tracklets": len(tracklets)}
     for side_index, side in enumerate(SIDES):
         side_tracklets = [t for t in tracklets if t.side == side]
-        selected = select_players(side_tracklets, source_fps, stride, config)
-        assignment = assign_partners(selected, frames_by_tracklet, source_fps, stride, config)
-        first_seen = {label: min((t.start_frame for t in selected
-                                  if assignment.label.get(t.tracklet_id) == label), default=0)
-                      for label in (0, 1)}
-        order = sorted((0, 1), key=lambda label: first_seen[label])
+        selected = select_players(side_tracklets, period_s, config)
+        assignment = assign_partners(selected, samples_by_tracklet, period_s, config)
+        order = _number_partners(rows, selected, assignment.label, side)
         base = 1 + side_index * config.players_per_side
         for t in selected:
             label = assignment.label.get(t.tracklet_id)
@@ -671,15 +721,56 @@ def _resolve_game(
     return players, diagnostics, prototypes, tracks
 
 
-def _assign_slots(players: pd.DataFrame) -> pd.Series:
-    """Left/right within each half: the lower court_x of two partners is left.
+def _number_partners(
+    rows: pd.DataFrame, selected: list[Tracklet], label_of: dict[int, int], side: str
+) -> list[int]:
+    """The two partner labels of one half, lower player number first.
 
-    A lone player on a half is assigned by which side of the center line they stand.
+    The partner in their own left slot at the first frame where both partners are
+    resolved comes first; partners never resolved together are ordered by who was
+    seen first.
     """
-    group = players.groupby(["frame_number", "side"])["smooth_x"]
+    first_seen = {label: min((t.start_frame for t in selected
+                              if label_of.get(t.tracklet_id) == label), default=0)
+                  for label in (0, 1)}
+    by_first_seen = sorted((0, 1), key=lambda label: first_seen[label])
+    labelled = rows[rows["tracklet_id"].isin(list(label_of))]
+    if labelled.empty:
+        return by_first_seen
+    labelled = labelled.assign(label=labelled["tracklet_id"].map(label_of))
+    # As the players' rows will be: one row per partner and frame, lowest tracklet first.
+    labelled = (labelled.sort_values(["label", "frame_number", "tracklet_id"])
+                .drop_duplicates(["label", "frame_number"], keep="first"))
+    x = labelled.pivot(index="frame_number", columns="label", values="smooth_x")
+    together = x.dropna() if len(x.columns) == 2 else x.iloc[0:0]
+    if together.empty:
+        return by_first_seen
+    first = together.iloc[0]
+    own_x = {label: float(_own_x(float(first[label]), side)) for label in (0, 1)}
+    return sorted((0, 1), key=lambda label: (own_x[label], first_seen[label]))
+
+
+def _own_x(court_x: float | np.ndarray, side: str | np.ndarray) -> Any:
+    """Court X as the player sees it facing the net: negative is their left.
+
+    Near players face away from the camera, so their right is court +X; far players
+    face the camera, so their right is court -X.
+    """
+    return np.where(np.asarray(side) == "far", -np.asarray(court_x), np.asarray(court_x))
+
+
+def _assign_slots(players: pd.DataFrame) -> pd.Series:
+    """Side plus left/right from each player's own point of view, facing the net.
+
+    Of two partners on a half, the one further to their own left is left. A lone
+    player is assigned by which side of the center line they stand.
+    """
+    own_x = pd.Series(_own_x(players["smooth_x"].to_numpy(), players["side"].to_numpy()),
+                      index=players.index)
+    group = own_x.groupby([players["frame_number"], players["side"]])
     count = group.transform("count")
     rank = group.rank(method="first")
-    is_left = np.where(count >= 2, rank == 1, players["smooth_x"] < 0)
+    is_left = np.where(count >= 2, rank == 1, own_x < 0)
     return players["side"] + np.where(is_left, "_left", "_right")
 
 

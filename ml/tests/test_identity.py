@@ -1,8 +1,11 @@
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from pickleball_ml.players.appearance import DESCRIPTOR_SIZE
+from pickleball_ml.players.court_position import with_ground_contact
 from pickleball_ml.players.identity import (
     IdentityConfig,
     resolve_identities,
@@ -22,8 +25,9 @@ def color(index: int) -> list[float]:
     return descriptor.tolist()
 
 
-def walk(track_id: int, frames: range, start: tuple[float, float], end: tuple[float, float],
-         shirt: int, height_px: float = 120.0) -> list[dict[str, object]]:
+def walk(track_id: int, frames: Sequence[int], start: tuple[float, float],
+         end: tuple[float, float], shirt: int, height_px: float = 120.0, fps: float = FPS,
+         ) -> list[dict[str, object]]:
     """Detections of one person walking in a straight line between court positions."""
     rows = []
     n = max(len(frames) - 1, 1)
@@ -31,7 +35,7 @@ def walk(track_id: int, frames: range, start: tuple[float, float], end: tuple[fl
         x = start[0] + (end[0] - start[0]) * i / n
         y = start[1] + (end[1] - start[1]) * i / n
         rows.append({
-            "frame_number": frame, "timestamp_ms": frame / FPS * 1000, "track_id": track_id,
+            "frame_number": frame, "timestamp_ms": frame / fps * 1000, "track_id": track_id,
             "x1": 500.0, "y1": 600.0 - height_px, "x2": 540.0, "y2": 600.0, "confidence": 0.9,
             "court_x": x, "court_y": y, "in_gate": True, "appearance": color(shirt),
         })
@@ -40,10 +44,12 @@ def walk(track_id: int, frames: range, start: tuple[float, float], end: tuple[fl
 
 def resolve(rows: list[dict[str, object]], end_switch_frames: tuple[int, ...] = ()
             ) -> pd.DataFrame:
-    players, _ = resolve_identities(pd.DataFrame(rows, columns=RAW_COLUMNS), FPS, STRIDE,
-                                    frame_height=1080, config=CONFIG,
-                                    end_switch_frames=end_switch_frames)
+    players, _ = resolve_identities(detections(rows), CONFIG, end_switch_frames=end_switch_frames)
     return players
+
+
+def detections(rows: list[dict[str, object]]) -> pd.DataFrame:
+    return with_ground_contact(pd.DataFrame(rows, columns=RAW_COLUMNS), frame_height=1080)
 
 
 def four_players(frames: range) -> list[dict[str, object]]:
@@ -110,14 +116,15 @@ def test_identities_are_numbered_by_team() -> None:
     assert teams == {1: "A", 2: "A", 3: "B", 4: "B"}
     sides = players.groupby("player_id")["side"].first().to_dict()
     assert sides == {1: "near", 2: "near", 3: "far", 4: "far"}
+    # Far players face the camera, so their own left is court +X.
     slots = players.groupby("track_id")["slot"].first().to_dict()
-    assert slots == {1: "near_left", 2: "near_right", 3: "far_left", 4: "far_right"}
+    assert slots == {1: "near_left", 2: "near_right", 3: "far_right", 4: "far_left"}
 
 
 def test_split_on_sudden_box_size_change() -> None:
     rows = walk(1, range(0, 40, STRIDE), (0, 10), (0, 10), shirt=1, height_px=60)
     rows += walk(1, range(40, 80, STRIDE), (0, 10), (0, 10), shirt=1, height_px=140)
-    split = split_tracklets(pd.DataFrame(rows, columns=RAW_COLUMNS), FPS, STRIDE, CONFIG)
+    split = split_tracklets(detections(rows), CONFIG)
     assert split["segment_id"].nunique() == 2
 
 
@@ -166,14 +173,15 @@ def test_untracked_detections_are_ignored() -> None:
 
 
 def teams_switch_ends(switch: int, end: int) -> list[dict[str, object]]:
-    """Game 1: shirts 1-2 near, 3-4 far. Game 2: the teams have changed ends, and the
-    partners of each team also swapped left/right. New tracker IDs after the break."""
+    """Game 1: shirts 1-2 near, 3-4 far, each in their own left then right slot (a far
+    player's own left is court +X). Game 2: the teams have changed ends, and the partners
+    of each team also swapped left/right. New tracker IDs after the break."""
     game1 = range(0, switch - 100, STRIDE)
     game2 = range(switch + 100, end, STRIDE)
     return (walk(1, game1, (-5, -15), (-5, -15), shirt=1)
             + walk(2, game1, (5, -15), (5, -15), shirt=2)
-            + walk(3, game1, (-5, 12), (-5, 12), shirt=3)
-            + walk(4, game1, (5, 12), (5, 12), shirt=4)
+            + walk(3, game1, (5, 12), (5, 12), shirt=3)
+            + walk(4, game1, (-5, 12), (-5, 12), shirt=4)
             + walk(11, game2, (-5, 12), (-5, 12), shirt=2)
             + walk(12, game2, (5, 12), (5, 12), shirt=1)
             + walk(13, game2, (-5, -15), (-5, -15), shirt=4)
@@ -247,10 +255,7 @@ def test_a_coin_flip_end_switch_link_marks_those_players_unconfident() -> None:
 
 def test_switch_margin_is_reported_per_player() -> None:
     rows = teams_switch_ends(1000, 2000)
-    _, diagnostics = resolve_identities(
-        pd.DataFrame(rows, columns=RAW_COLUMNS), FPS, STRIDE, frame_height=1080,
-        config=CONFIG, end_switch_frames=(1000,),
-    )
+    _, diagnostics = resolve_identities(detections(rows), CONFIG, end_switch_frames=(1000,))
     link = diagnostics["games"][1]["switch_link"]
     assert set(link["player_margins"]) == {"1", "2", "3", "4"}
     assert all(v > 0 for v in link["player_margins"].values())
@@ -266,3 +271,113 @@ def test_head_and_shoulders_boxes_are_not_players() -> None:
     players = resolve(rows + spectator)
     assert 9 not in set(players["track_id"])
     assert set(players["player_id"]) == {1, 2, 3, 4}
+
+
+# --- Slots: left and right from the player's own point of view ---------------------
+
+
+def slot_of(players: pd.DataFrame, track_id: int) -> str:
+    slots = set(players.loc[players["track_id"] == track_id, "slot"])
+    assert len(slots) == 1
+    return str(slots.pop())
+
+
+def test_a_far_side_player_at_court_plus_x_is_in_their_own_left_slot() -> None:
+    frames = range(0, 100, STRIDE)
+    players = resolve(walk(1, frames, (5, 12), (5, 12), shirt=1)
+                      + walk(2, frames, (-5, 12), (-5, 12), shirt=2))
+    assert slot_of(players, 1) == "far_left"
+    assert slot_of(players, 2) == "far_right"
+
+
+def test_a_near_side_player_at_court_plus_x_is_in_their_own_right_slot() -> None:
+    frames = range(0, 100, STRIDE)
+    players = resolve(walk(1, frames, (5, -15), (5, -15), shirt=1)
+                      + walk(2, frames, (-5, -15), (-5, -15), shirt=2))
+    assert slot_of(players, 1) == "near_right"
+    assert slot_of(players, 2) == "near_left"
+
+
+@pytest.mark.parametrize(
+    ("position", "slot"),
+    [((3, -15), "near_right"), ((-3, -15), "near_left"),
+     ((3, 12), "far_left"), ((-3, 12), "far_right")],
+)
+def test_a_lone_player_is_in_the_slot_on_their_side_of_the_centre_line(
+    position: tuple[float, float], slot: str
+) -> None:
+    players = resolve(walk(1, range(0, 100, STRIDE), position, position, shirt=1))
+    assert slot_of(players, 1) == slot
+
+
+# --- Numbering: team A is near at the start; the left partner is the lower number -----
+
+
+def numbers(players: pd.DataFrame) -> dict[int, int]:
+    """Player number of each track."""
+    by_track = players.groupby("track_id")["player_id"].unique()
+    assert all(len(ids) == 1 for ids in by_track)
+    return {int(track): int(ids[0]) for track, ids in by_track.items()}
+
+
+def test_the_partner_in_their_own_left_slot_gets_the_lower_number() -> None:
+    """The right-slot partner of each team is seen first; the left one still gets 1 or 3."""
+    rows = (walk(1, range(0, 300, STRIDE), (5, -15), (5, -15), shirt=1)  # near right
+            + walk(2, range(40, 300, STRIDE), (-5, -15), (-5, -15), shirt=2)  # near left
+            + walk(3, range(0, 300, STRIDE), (-5, 12), (-5, 12), shirt=3)  # far right
+            + walk(4, range(40, 300, STRIDE), (5, 12), (5, 12), shirt=4))  # far left
+    assert numbers(resolve(rows)) == {1: 2, 2: 1, 3: 4, 4: 3}
+
+
+def test_partners_never_seen_together_are_numbered_by_who_was_seen_first() -> None:
+    rows = (walk(1, range(0, 200, STRIDE), (5, -15), (5, -15), shirt=1)
+            + walk(2, range(400, 600, STRIDE), (-5, -15), (-5, -15), shirt=2))
+    assert numbers(resolve(rows)) == {1: 1, 2: 2}
+
+
+def test_the_team_near_at_the_start_is_team_a() -> None:
+    rows = (walk(1, range(0, 300, STRIDE), (-5, 12), (-5, 12), shirt=1)
+            + walk(2, range(0, 300, STRIDE), (5, 12), (5, 12), shirt=2)
+            + walk(3, range(100, 300, STRIDE), (-5, -15), (-5, -15), shirt=3)
+            + walk(4, range(100, 300, STRIDE), (5, -15), (5, -15), shirt=4))
+    players = resolve(rows)
+    team = players.groupby("track_id")["team"].first().to_dict()
+    assert team == {1: "B", 2: "B", 3: "A", 4: "A"}
+
+
+def test_resolving_the_same_input_twice_gives_the_same_player_numbers() -> None:
+    rows = teams_switch_ends(1000, 2000)
+    first = resolve(rows, end_switch_frames=(1000,))
+    second = resolve(rows, end_switch_frames=(1000,))
+    pd.testing.assert_frame_equal(first, second)
+
+
+# --- Time-based sampling: gaps between samples vary ----------------------------------
+
+NTSC_FPS = 60000 / 1001
+#: Frames between samples as Detect picks them from a 59.94 fps video: 4 on average,
+#: 3 or 5 where the 1/15 s tick and the frame timestamps round the other way.
+JITTERED_GAPS = (4, 4, 5, 3)
+
+
+def jittered_frames(count: int) -> list[int]:
+    """`count` sample frames, `JITTERED_GAPS[i % 4]` frames after sample i."""
+    gaps = np.resize(JITTERED_GAPS, count - 1)
+    return [0, *np.cumsum(gaps).tolist()]
+
+
+def test_sample_gaps_of_varying_length_keep_a_player_whole() -> None:
+    """A track cut into tracklets where other people come and go on its half (here a
+    second near player who appears and leaves) is joined back at every cut, whatever the
+    frame gap to the next sample happens to be there."""
+    frames = jittered_frames(300)
+    rows = walk(1, frames, (-5, -15), (-4, -14), shirt=1, fps=NTSC_FPS)
+    # Samples i % 4 == 2 are followed by a 5-frame gap, i % 4 == 3 by a 3-frame gap: the
+    # partner's pieces end, and start, on both.
+    for k, (first, last) in enumerate(((30, 74), (100, 143), (200, 250))):
+        rows += walk(10 + k, frames[first:last + 1], (5, -15), (5, -15), shirt=2,
+                     fps=NTSC_FPS)
+    players = resolve(rows)
+    one = players[players["track_id"] == 1]
+    assert len(one) == len(frames)
+    assert one["player_id"].nunique() == 1

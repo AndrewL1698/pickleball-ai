@@ -52,23 +52,39 @@ def truncated(
     return np.asarray(np.asarray(y2, dtype=np.float64) >= frame_height - edge_margin_px)
 
 
-def project_detections(
-    detections: pd.DataFrame,
-    homography: FloatArray,
-    frame_height: int,
-    edge_margin_px: int = EDGE_MARGIN_PX,
+def with_ground_contact(
+    detections: pd.DataFrame, frame_height: int, edge_margin_px: int = EDGE_MARGIN_PX
 ) -> pd.DataFrame:
-    """Add ground-contact image point and its court coordinates to box rows.
+    """Add the ground-contact image point (`image_x`, `image_y`) and `truncated` to box rows.
 
     `truncated` marks boxes cut off by the bottom of the frame, whose feet are
     not visible, so the projected position is unreliable.
     """
     out = detections.copy()
     feet = foot_points(out[["x1", "y1", "x2", "y2"]].to_numpy())
-    court = apply_homography(homography, feet) if len(out) else np.empty((0, 2))
     out["image_x"] = feet[:, 0]
     out["image_y"] = feet[:, 1]
-    out["court_x"] = court[:, 0]
-    out["court_y"] = court[:, 1]
     out["truncated"] = truncated(out["y2"].to_numpy(), frame_height, edge_margin_px)
     return out
+
+
+def project_ground_contact(detections: pd.DataFrame, homography: FloatArray) -> pd.DataFrame:
+    """Add `court_x`, `court_y`: the rows' `image_x`, `image_y` projected onto the court."""
+    out = detections.copy()
+    feet = out[["image_x", "image_y"]].to_numpy(dtype=np.float64)
+    court = apply_homography(homography, feet) if len(out) else np.empty((0, 2))
+    out["court_x"] = court[:, 0]
+    out["court_y"] = court[:, 1]
+    return out
+
+
+def project_detections(
+    detections: pd.DataFrame,
+    homography: FloatArray,
+    frame_height: int,
+    edge_margin_px: int = EDGE_MARGIN_PX,
+) -> pd.DataFrame:
+    """Add ground-contact image point, its court coordinates, and `truncated` to box rows."""
+    return project_ground_contact(
+        with_ground_contact(detections, frame_height, edge_margin_px), homography
+    )
