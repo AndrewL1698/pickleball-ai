@@ -72,7 +72,7 @@ CALIBRATION_REFUSAL_MESSAGES: dict[CalibrationRefusal, str] = {
 PLAYERS_JOB_REFUSAL_MESSAGES: dict[PlayersJobRefusal, str] = {
     PlayersJobRefusal.NO_CALIBRATION: "This match's court has not been calibrated yet.",
     PlayersJobRefusal.JOB_ACTIVE: REFUSAL_MESSAGES[MetadataJobRefusal.JOB_ACTIVE],
-    PlayersJobRefusal.ALREADY_DETECTED: "This match's players have already been detected.",
+    PlayersJobRefusal.ALREADY_DETECTED: "This match's players have already been tracked.",
 }
 
 #: A frame is written once and never changes, and its id is random.
@@ -237,18 +237,22 @@ def start_reference_frame_job(
     "/{match_id}/players-jobs",
     response_model=MatchDetail,
     status_code=status.HTTP_202_ACCEPTED,
-    responses={409: {"description": "Not calibrated, a job is active, or Detect has finished"}},
+    responses={
+        409: {"description": "Not calibrated, a job is active, or players are already tracked"}
+    },
 )
 def start_players_job(
     session: SessionDep, queue: QueueDep, settings: SettingsDep, match_id: UUID
 ) -> MatchDetail:
-    """Queue player tracking for a calibrated match whose Detect has not finished.
+    """Queue player tracking for a calibrated match whose players are not tracked yet.
 
     Saving a calibration queues the first players job by itself. This is for a
     match whose players job failed or could not be queued: the new job continues
     the match's unfinished Detect run, with that run's own calibration and
-    configuration, from its first unfinished chunk. Refused with `409` without a
-    calibration, while any job is active, or once Detect has finished, since a
+    configuration, from its first unfinished chunk, and runs Identify after each
+    chunk. If Detect has finished but no Identify run followed it, the job runs
+    Identify only. Refused with `409` without a calibration, while any job is
+    active, or once Detect has finished and Identify has run, since a
     recalibration never re-detects (ADR 0001). Concurrency works as it does for
     `start_metadata_job`.
     """

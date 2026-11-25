@@ -26,12 +26,14 @@ from pickleball_api.models import (
     Match,
     MatchStatus,
     ModelRun,
+    ModelRunStage,
     ReferenceFrame,
     ReferenceFrameKind,
+    Team,
     Video,
     utcnow,
 )
-from pickleball_api.run_artifacts import read_detect_chunks
+from pickleball_api.run_artifacts import read_detect_chunks, read_run_artifact
 from pickleball_api.storage import LocalFileStorage, new_storage_key
 from pickleball_ml.players.detect import (
     DETECT_COLUMNS,
@@ -39,9 +41,10 @@ from pickleball_ml.players.detect import (
     DetectConfig,
     TrackingUnavailable,
 )
+from pickleball_ml.players.identify import PLAYER_TRACK_COLUMNS, Identified, identify
 from pickleball_ml.video.fixtures import write_test_video
 from pickleball_ml.video.reader import Frame
-from pickleball_worker.players import DetectSetup, default_detect_setup
+from pickleball_worker.players import DetectSetup, IdentifySetup, default_detect_setup
 from pickleball_worker.tasks import run_analysis_job
 
 FPS, FRAMES = 30.0, 105  # 3.5 s
@@ -49,6 +52,8 @@ FPS, FRAMES = 30.0, 105  # 3.5 s
 ON_COURT = [[1.0, 0.0, 0.0], [0.0, 1.0, -20.0], [0.0, 0.0, 1.0]]
 #: A recalibration that would put everyone 1000 ft off court, outside the gate.
 FAR_AWAY = [[1.0, 0.0, 1000.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+#: A recalibration 1 ft to the side of `ON_COURT`: everyone still on court.
+NUDGED = [[1.0, 0.0, 1.0], [0.0, 1.0, -20.0], [0.0, 0.0, 1.0]]
 MODEL = "fake.pt@sha256:0123"
 RUNTIME = {"device": "fake", "ultralytics": "0", "torch": "0"}
 
@@ -160,8 +165,62 @@ def players_job(match_id: uuid.UUID) -> AnalysisJob:
         return match.latest_job
 
 
-def run_players(match_id: uuid.UUID, storage: LocalFileStorage, detect: DetectSetup) -> Any:
-    return run_analysis_job(str(players_job(match_id).id), storage=storage, detect=detect)
+def run_players(
+    match_id: uuid.UUID,
+    storage: LocalFileStorage,
+    detect: DetectSetup,
+    identify_with: IdentifySetup | None = None,
+) -> Any:
+    return run_analysis_job(
+        str(players_job(match_id).id), storage=storage, detect=detect,
+        identify_with=identify_with,
+    )
+
+
+class IdentifyFails(Exception):
+    pass
+
+
+def identify_failing_on(*calls: int) -> IdentifySetup:
+    """The real Identify, except that the given calls (1 is the first) raise."""
+    made = 0
+
+    def run(*args: Any, **kwargs: Any) -> Identified:
+        nonlocal made
+        made += 1
+        if made in calls:
+            raise IdentifyFails(f"call {made}")
+        return identify(*args, **kwargs)
+
+    return IdentifySetup(run=run)
+
+
+def identify_runs(match_id: uuid.UUID) -> list[ModelRun]:
+    with db.session_scope() as session:
+        match = session.get(Match, match_id)
+        assert match is not None
+        return [run for run in match.runs if run.stage is ModelRunStage.IDENTIFY]
+
+
+def current_identify_run(match_id: uuid.UUID) -> ModelRun | None:
+    with db.session_scope() as session:
+        match = session.get(Match, match_id)
+        assert match is not None
+        return match.current_identify_run
+
+
+def players(match_id: uuid.UUID) -> list[tuple[uuid.UUID, int, Team]]:
+    with db.session_scope() as session:
+        match = session.get(Match, match_id)
+        assert match is not None
+        return [(p.id, p.number, p.team) for p in match.players]
+
+
+def can_start_players_job(match_id: uuid.UUID) -> bool:
+    with db.session_scope() as session:
+        match = session.get(Match, match_id)
+        assert match is not None
+        return match.can_start_players_job
 
 
 def detect_runs(match_id: uuid.UUID) -> list[ModelRun]:
@@ -338,6 +397,144 @@ def test_a_job_for_a_match_already_detected_finishes_without_detecting(
     assert players_job(match_id).status is JobStatus.READY
     assert detector.seconds_seen == []
     assert len(detect_runs(match_id)) == 1
+    # Identify runs once more, on the whole Detect run, and numbers everyone the same.
+    runs = identify_runs(match_id)
+    assert len(runs) == 5
+    before, after = (read_run_artifact(storage, run) for run in runs[-2:])
+    pd.testing.assert_frame_equal(before, after)
+
+
+# --- Identify -----------------------------------------------------------------
+
+
+def test_identify_runs_after_every_finished_chunk_and_the_match_shows_the_last(
+    make_match: Callable[..., uuid.UUID], storage: LocalFileStorage
+) -> None:
+    match_id = make_match()
+    run_players(match_id, storage, stage(FakeDetector()))
+
+    (detect,) = detect_runs(match_id)
+    runs = identify_runs(match_id)
+    assert [run.config_json["detect_chunks"] for run in runs] == [1, 2, 3, 4]
+    assert all(run.completed_at is not None for run in runs)
+    assert all(run.parent_run_id == detect.id for run in runs)
+    assert all(run.model_version.startswith("pickleball_ml.players.identity@") for run in runs)
+    current = current_identify_run(match_id)
+    assert current is not None and current.id == runs[-1].id
+
+    config = current.config_json
+    assert config["tracked_until_seconds"] == pytest.approx(FRAMES / FPS, abs=0.1)
+    assert config["steady_part"] == detect.config_json["steady_part"]
+    assert config["changeovers_seconds"] == []
+    assert config["identity"]["players_per_side"] == 2
+
+    tracks = read_run_artifact(storage, current)
+    assert list(tracks.columns) == PLAYER_TRACK_COLUMNS
+    assert len(tracks) > 0
+    # Both fake people stand on the far half.
+    assert set(tracks["player_number"]) == {3, 4}
+    assert set(tracks["team"]) == {"B"}
+
+
+def test_the_four_players_are_created_once_and_reused(
+    make_match: Callable[..., uuid.UUID], storage: LocalFileStorage
+) -> None:
+    match_id = make_match()
+    run_players(match_id, storage, stage(FakeDetector()))
+    created = players(match_id)
+    assert [(number, team) for _, number, team in created] == [
+        (1, Team.A), (2, Team.A), (3, Team.B), (4, Team.B)
+    ]
+    with db.session_scope() as session:
+        match = session.get(Match, match_id)
+        assert match is not None
+        session.add(jobs.new_job(match, JobKind.PLAYERS))
+    run_players(match_id, storage, stage(FakeDetector()))
+    assert players(match_id) == created
+
+
+def test_identify_runs_on_an_unfinished_detect_run(
+    make_match: Callable[..., uuid.UUID], storage: LocalFileStorage
+) -> None:
+    match_id = make_match()
+    with pytest.raises(Killed):
+        run_players(match_id, storage, stage(FakeDetector(die_at_frame=40)))
+    (detect,) = detect_runs(match_id)
+    assert detect.completed_at is None
+    current = current_identify_run(match_id)
+    assert current is not None and current.parent_run_id == detect.id
+    assert current.config_json["detect_chunks"] == 2
+    assert current.config_json["tracked_until_seconds"] == pytest.approx(2.0)
+    assert len(read_run_artifact(storage, current)) > 0
+
+
+def test_identify_projects_with_the_newest_calibration_while_detect_keeps_its_own(
+    make_match: Callable[..., uuid.UUID], storage: LocalFileStorage
+) -> None:
+    match_id = make_match()
+    with pytest.raises(Killed):
+        run_players(match_id, storage, stage(FakeDetector(die_at_frame=40)))
+    with db.session_scope() as session:
+        match = session.get(Match, match_id)
+        assert match is not None
+        newest = calibrate(match, NUDGED)
+        session.flush()
+        newest_id = newest.id
+    queue_another_players_job(match_id)
+    run_players(match_id, storage, stage(FakeDetector()))
+
+    (detect,) = detect_runs(match_id)
+    assert detect.calibration.homography == ON_COURT
+    current = current_identify_run(match_id)
+    assert current is not None and current.calibration_id == newest_id
+    tracks = read_run_artifact(storage, current)
+    assert np.allclose(tracks["court_x"], tracks["image_x"] + 1.0)
+    assert np.allclose(tracks["court_y"], tracks["image_y"] - 20.0)
+
+
+def test_an_identify_failure_fails_the_job_and_keeps_the_detect_chunks(
+    make_match: Callable[..., uuid.UUID], storage: LocalFileStorage
+) -> None:
+    match_id = make_match()
+    assert run_players(match_id, storage, stage(FakeDetector()), identify_failing_on(1)) is None
+    job = players_job(match_id)
+    assert (job.status, job.error_code) == (JobStatus.FAILED, "identify_failed")
+    (detect,) = detect_runs(match_id)
+    assert [c.index for c in detect.chunks] == [0]
+    assert identify_runs(match_id) == []
+    assert current_identify_run(match_id) is None
+    assert players(match_id) == []
+
+    # A new job continues Detect from chunk 1 and identifies after each chunk.
+    queue_another_players_job(match_id)
+    resumed = FakeDetector()
+    run_players(match_id, storage, stage(resumed))
+    assert players_job(match_id).status is JobStatus.READY
+    assert len(resumed.seconds_seen) == 53 - 15
+    assert [r.config_json["detect_chunks"] for r in identify_runs(match_id)] == [2, 3, 4]
+
+
+def test_a_finished_detect_run_whose_last_identify_failed_gets_an_identify_only_job(
+    make_match: Callable[..., uuid.UUID], storage: LocalFileStorage
+) -> None:
+    match_id = make_match()
+    run_players(match_id, storage, stage(FakeDetector()), identify_failing_on(4))
+    assert players_job(match_id).error_code == "identify_failed"
+    (detect,) = detect_runs(match_id)
+    assert detect.completed_at is not None
+    current = current_identify_run(match_id)
+    assert current is not None and current.config_json["detect_chunks"] == 3
+    # The players shown stop short of the end of Detect, so the match may try again.
+    assert can_start_players_job(match_id)
+
+    queue_another_players_job(match_id)
+    detector = FakeDetector()
+    run_players(match_id, storage, stage(detector))
+    assert players_job(match_id).status is JobStatus.READY
+    assert detector.seconds_seen == []
+    current = current_identify_run(match_id)
+    assert current is not None and current.config_json["detect_chunks"] == 4
+    assert not can_start_players_job(match_id)
 
 
 # --- The steady part ----------------------------------------------------------

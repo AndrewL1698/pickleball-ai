@@ -52,6 +52,7 @@ from pickleball_ml.paths import (
     StageOutputs,
     ground_contact_labels_path,
 )
+from pickleball_ml.players.court_position import with_ground_contact
 from pickleball_ml.players.identity import IdentityConfig, resolve_identities, run_record
 from pickleball_ml.players.tracking import TrackingConfig, track_people
 from pickleball_ml.render.topdown import render_topdown_video
@@ -249,8 +250,7 @@ def cmd_identify(args: argparse.Namespace, outputs: StageOutputs) -> int:
     config = IdentityConfig()
     switches = [_to_frame(s, metadata.fps) for s in args.end_switch]
     players, diagnostics = resolve_identities(
-        raw, metadata.fps, raw_run["config"]["stride"], metadata.height, config,
-        end_switch_frames=switches,
+        with_ground_contact(raw, metadata.height), config, end_switch_frames=switches,
     )
     players.to_parquet(outputs.players_court, index=False)
     record = run_record(config, players, diagnostics, raw_run["frames_processed"])

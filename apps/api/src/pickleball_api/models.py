@@ -19,7 +19,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 
 from sqlalchemy import (
     JSON,
@@ -134,7 +134,8 @@ class PlayersJobRefusal(enum.StrEnum):
 
     NO_CALIBRATION = "no_calibration"
     JOB_ACTIVE = "job_active"
-    #: Detect has finished, and a recalibration never re-detects (ADR 0001).
+    #: Detect has finished and Identify has run on it. A recalibration never
+    #: re-detects (ADR 0001); re-running Identify alone is a later change.
     ALREADY_DETECTED = "already_detected"
 
 
@@ -152,6 +153,14 @@ class CalibrationSource(enum.StrEnum):
     """Who placed a calibration's landmarks."""
 
     MANUAL = "manual"
+
+
+class Team(enum.StrEnum):
+    """A pair of partners, persistent for the whole match. Team A is the team on
+    the near end when the match starts."""
+
+    A = "A"
+    B = "B"
 
 
 class ModelRunStage(enum.StrEnum):
@@ -259,6 +268,12 @@ class Match(Base):
         cascade="all, delete-orphan",
         foreign_keys="ModelRun.match_id",
         order_by="ModelRun.started_at, ModelRun.id",
+    )
+    players: Mapped[list["Player"]] = relationship(
+        back_populates="match",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="Player.number",
     )
     current_identify_run: Mapped["ModelRun | None"] = relationship(
         foreign_keys=[current_identify_run_id],
@@ -391,20 +406,89 @@ class Match(Base):
     def players_job_refusal(self) -> PlayersJobRefusal | None:
         """Why a players job may not start, or None if it may.
 
-        It may for a calibrated match with no active job whose Detect has not
-        finished: one that never ran, or one a failed job left unfinished.
+        It may for a calibrated match with no active job whose players are not
+        tracked yet: Detect never ran, a failed job left it unfinished, or it
+        finished with no Identify run over all of it (Identify failed, or the
+        worker died first). That last job skips Detect and runs Identify only.
         """
         if self.latest_calibration is None:
             return PlayersJobRefusal.NO_CALIBRATION
         if self.active_job is not None:
             return PlayersJobRefusal.JOB_ACTIVE
-        if self.complete_detect_run is not None:
+        if self.players_tracked:
             return PlayersJobRefusal.ALREADY_DETECTED
         return None
 
     @property
+    def players_tracked(self) -> bool:
+        """Detect has finished, and the Identify run shown read every chunk of it.
+
+        Identify runs after each Detect chunk, so an Identify run that read only the
+        earlier chunks can be shown while the last one failed. `detect_chunks` is
+        written by `pickleball_ml.players.identify.IdentifyRunConfig`; the worker's
+        tests run the two together.
+        """
+        detect = self.complete_detect_run
+        shown = self.current_identify_run
+        return (
+            detect is not None
+            and shown is not None
+            and shown.parent_run_id == detect.id
+            and shown.config_json.get("detect_chunks") == len(detect.chunks)
+        )
+
+    def ensure_players(self) -> list["Player"]:
+        """The match's four players, created on the first call: 1 and 2 are team A,
+        3 and 4 team B. Later calls return the same rows."""
+        if not self.players:
+            for number in PLAYER_NUMBERS:
+                self.players.append(Player(number=number, team=Player.team_of(number)))
+        return self.players
+
+    @property
     def can_start_players_job(self) -> bool:
         return self.players_job_refusal() is None
+
+
+#: A doubles match has four players.
+PLAYER_NUMBERS: Final = (1, 2, 3, 4)
+
+
+class Player(Base):
+    """One of the four people playing a match, the same identity for the whole match.
+
+    Created by the match's first Identify run and reused by later ones. Player tracks
+    name a player by `number`, never by id. Side and slot change during play, so they
+    live in the tracks, not here.
+    """
+
+    __tablename__ = "players"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    match_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("matches.id", ondelete="CASCADE", name="fk_players_match_id_matches")
+    )
+    team: Mapped[Team] = mapped_column(_enum_column(Team, "player_team"))
+    #: 1 and 2 are team A, 3 and 4 team B. Within a team, the lower number is the
+    #: partner in their own left slot when both are first seen together.
+    number: Mapped[int] = mapped_column(Integer)
+    #: Optional, given by a user.
+    name: Mapped[str | None] = mapped_column(String(100), default=None)
+
+    match: Mapped[Match] = relationship(back_populates="players")
+
+    __table_args__ = (
+        CheckConstraint("number BETWEEN 1 AND 4", name="ck_players_number_range"),
+        CheckConstraint(
+            "(number <= 2 AND team = 'A') OR (number >= 3 AND team = 'B')",
+            name="ck_players_number_matches_team",
+        ),
+        UniqueConstraint("match_id", "number", name="uq_players_match_id_number"),
+    )
+
+    @staticmethod
+    def team_of(number: int) -> Team:
+        return Team.A if number <= 2 else Team.B
 
 
 @dataclass(frozen=True)

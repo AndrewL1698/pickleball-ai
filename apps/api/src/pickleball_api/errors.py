@@ -27,6 +27,9 @@ class JobErrorCode(enum.StrEnum):
     TRACKING_UNAVAILABLE = "tracking_unavailable"
     #: An unfinished Detect run was started with a model file this worker does not have.
     MODEL_CHANGED = "model_changed"
+    #: Identify raised. The Detect chunks finished so far are kept, so a new players
+    #: job continues Detect, or runs Identify alone once Detect is complete.
+    IDENTIFY_FAILED = "identify_failed"
     INTERNAL = "internal"
 
 
@@ -43,6 +46,10 @@ JOB_ERROR_MESSAGES: dict[JobErrorCode, str] = {
     JobErrorCode.MODEL_CHANGED: (
         "Player detection for this match was started with a different model, so it cannot"
         " be continued here."
+    ),
+    JobErrorCode.IDENTIFY_FAILED: (
+        "Players were detected, but telling them apart failed. Detection is kept, so"
+        " trying again does not repeat it."
     ),
     JobErrorCode.INTERNAL: "Processing failed because of an internal error.",
 }

@@ -85,7 +85,9 @@ in `docs/PHASE_0B_RESULTS.md`.
   queues a players job. The worker runs person detection, the court gate and
   ByteTrack (*Detect*) over the steady part of the video, about 15 frames a
   second, saving five-minute chunks as it goes so a failed job can be continued.
-  Its output is image-space detections only; nothing shows it on a page yet.
+  After every chunk it runs *Identify* on everything detected so far: the four
+  players, numbered 1-4 in teams A and B, with their court positions and slots,
+  stored as Parquet. Nothing shows the tracks on a page yet.
 
 ## Development Setup
 
@@ -157,9 +159,9 @@ a worker installed on its own needs `uv sync --package pickleball-worker --extra
 tracking`. On Apple Silicon it runs on `mps`. A worker without torch or the model
 file fails players jobs with `tracking_unavailable`.
 
-Continue a players job that failed partway, from its first unfinished chunk
-(answers `409` without a calibration, while a job is active, or once detection
-has finished):
+Continue a players job that failed partway, from its first unfinished chunk, or
+re-run Identify alone if detection finished but identification did not (answers
+`409` without a calibration, while a job is active, or once players are tracked):
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/api/matches/<match_id>/players-jobs
@@ -206,7 +208,9 @@ metadata has no images and nothing is queued for it: use the **Make calibration
 images** button on its page. Migration 0007 adds the camera check. A video processed
 before it stays not checked unless it is uploaded again. Migrations 0009 and 0010 add
 the job's `kind` and the chunks of a Detect run, and queue nothing: an already
-calibrated match gets its players job from `POST .../players-jobs`.
+calibrated match gets its players job from `POST .../players-jobs`. Migration 0011
+adds the players table; a match whose Detect finished before it has no Identify run,
+so `POST .../players-jobs` runs Identify on it.
 
 The API and the base worker import OpenCV (through `pickleball_ml.video` and
 `pickleball_ml.court.geometry`) but not torch: both depend on `pickleball-ml`

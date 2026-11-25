@@ -41,7 +41,12 @@ from pickleball_api.models import (
 )
 from pickleball_api.storage import LocalFileStorage, Storage
 from pickleball_worker.job_updates import JobProgressWriter, finish_job
-from pickleball_worker.players import DetectSetup, default_detect_setup, run_players_job
+from pickleball_worker.players import (
+    DetectSetup,
+    IdentifySetup,
+    default_detect_setup,
+    run_players_job,
+)
 from pickleball_worker.processors import (
     ProcessingResult,
     VideoProcessor,
@@ -58,17 +63,20 @@ def run_analysis_job(
     storage: Storage | None = None,
     settings: Settings | None = None,
     detect: DetectSetup | None = None,
+    identify_with: IdentifySetup | None = None,
 ) -> dict[str, Any] | None:
     """Run one analysis job to a terminal status.
 
     The optional arguments exist for tests; RQ calls this with the id alone.
-    `processor` runs a preparation job and `detect` a players job.
+    `processor` runs a preparation job, and `detect` and `identify_with` a players job.
     """
     settings = settings or get_settings()
     storage = storage or LocalFileStorage(settings.upload_dir)
     identifier = UUID(job_id)
     if _kind_of(identifier) is JobKind.PLAYERS:
-        return run_players_job(identifier, storage, detect or default_detect_setup(settings))
+        return run_players_job(
+            identifier, storage, detect or default_detect_setup(settings), identify_with
+        )
     processor = processor or default_processor()
 
     video = _claim(identifier)

@@ -4,7 +4,7 @@ The FastAPI service, the database, the storage layer and the job worker added in
 Phase 1, re-parented under `Match` in Phase 2 checkpoint 1, given real video
 metadata extraction in checkpoint 2, calibration images and court calibrations
 in checkpoints 3 and 4, and model runs with their stored artifacts and the
-players job that runs Detect in Phase 3.
+players job that runs Detect and Identify in Phase 3.
 The architecture
 this is heading towards is in `ARCHITECTURE.md`, and the eventual schema is in
 `DATA_MODEL.md`.
@@ -16,7 +16,9 @@ its video and a job, queue the job, let a worker claim it, decode the video's
 metadata and make stills from it, drive the job through
 `queued -> running -> ready` (or `failed`) while the match's status follows, retry
 on request, fit and save a court calibration, queue player tracking once the court is
-calibrated, run person detection over the video in checkpointed chunks, and expose
+calibrated, run person detection over the video in checkpointed chunks, turn what
+has been detected into four numbered players in court coordinates after every chunk,
+and expose
 enough over HTTP for a frontend to list and inspect matches.
 
 There are two kinds of job (`analysis_jobs.kind`). A `preparation` job, which every
@@ -25,8 +27,10 @@ dimensions, rotation, average frame rate, duration, frame count and codec, write
 stills of it, with `pickleball_ml.video.reader`, and compares those frames for a
 moved camera. A `players` job, queued by the first calibration, runs *Detect* (ADR
 0001): YOLO person detection, the court gate and ByteTrack, over the steady part of the
-video (see Player Detection). It writes image-space detections only. Identify, which
-turns them into players in court coordinates, is not here yet.
+video (see Player Detection), writing image-space detections only. After every
+chunk it runs *Identify* on everything detected so far: projection into court feet
+with the newest calibration, player selection, partners and numbering (see Player
+Identification).
 
 There is no authentication and no video playback yet. The web app that drives this
 API is described in `FRONTEND.md`.
@@ -39,7 +43,7 @@ apps/api/                              # package `pickleball_api`
 ├── Dockerfile                         # shared by the api and worker compose services
 ├── migrations/
 │   ├── env.py                         # reads the URL from settings unless given one
-│   └── versions/                      # 0001 tables, 0002 CHECKs, 0003 matches, 0004 metadata, 0005 stills, 0006 calibrations, 0007 camera check, 0008 model runs, 0009 job kind, 0010 run chunks
+│   └── versions/                      # 0001 tables, 0002 CHECKs, 0003 matches, 0004 metadata, 0005 stills, 0006 calibrations, 0007 camera check, 0008 model runs, 0009 job kind, 0010 run chunks, 0011 players
 ├── src/pickleball_api/
 │   ├── calibration.py                 # fits landmarks through pickleball_ml, or refuses them
 │   ├── config.py                      # typed settings, and the extension allowlist
@@ -63,7 +67,7 @@ apps/api/                              # package `pickleball_api`
 workers/video_processor/               # package `pickleball_worker`
 ├── src/pickleball_worker/
 │   ├── processors.py                  # VideoProcessor, MetadataProcessor, CalibrationPreparationProcessor
-│   ├── players.py                     # players jobs: Detect, chunk by chunk, resumable
+│   ├── players.py                     # players jobs: Detect chunk by chunk, resumable, Identify after each
 │   ├── job_updates.py                 # a running job's progress and its outcome
 │   ├── tasks.py                       # the RQ task, dispatch by job kind, transaction boundaries
 │   └── __main__.py                    # `pbworker`
@@ -112,7 +116,7 @@ by importing the function, so the edge really does point one way.
 | `POST` | `/api/matches/{match_id}/reference-frame-jobs` | Queue a job for a match with metadata but no calibration images. Answers as above |
 | `GET` | `/api/matches/{match_id}/reference-frames/{frame_id}` | One calibration image, as `image/jpeg`. `404` if unknown, under another match, or gone from storage |
 | `POST` | `/api/matches/{match_id}/calibrations` | Fit and save a calibration, and queue a players job for a match never detected. `201` with the match; `409` if refused; `422` with a sentence if the landmarks cannot make a court |
-| `POST` | `/api/matches/{match_id}/players-jobs` | Queue a players job that continues an unfinished Detect run, or starts one. `202` with the match; `409` without a calibration, while a job is active, or once Detect has finished; `503` if it cannot be queued |
+| `POST` | `/api/matches/{match_id}/players-jobs` | Queue a players job that continues an unfinished Detect run, starts one, or runs Identify alone on a finished one. `202` with the match; `409` without a calibration, while a job is active, or once Detect has finished and Identify has read all of it; `503` if it cannot be queued |
 | `GET` | `/api/jobs/{job_id}` | Status, stage, progress, timestamps, failure code, `match_id`. `404` if unknown |
 | `GET` | `/health` | Liveness. Touches no dependency |
 | `GET` | `/ready` | Readiness. Checks the database and Redis; `503` if either is down |
@@ -212,7 +216,7 @@ has no room, `503` when the job cannot be queued.
 
 ## Data Model
 
-Six tables. `matches` is the parent:
+Eight tables. `matches` is the parent:
 
 | Column | Notes |
 |---|---|
@@ -289,6 +293,12 @@ removes all of them.
 `storage_key` (unique, never returned), `completed_at`. `(run_id, index)` is unique. A
 Detect run's output is its chunks, each a Parquet object committed with its row, so a
 retry finds the first unfinished chunk by counting them.
+
+`players`: `id`, `match_id` (FK, `ON DELETE CASCADE`), `team` (`A` or `B`),
+`number` (1-4), `name` (nullable). `(match_id, number)` is unique, and a CHECK keeps
+1-2 in team A and 3-4 in team B. The first Identify run of a match creates all four
+(`Match.ensure_players`); later runs reuse them. Player tracks name a player by
+`number`, so the ML package never sees a database id.
 
 `CourtCalibration.reference_frame` exists so the ORM orders its writes. Without it,
 deleting a match through the ORM could delete a frame before the calibration and run
@@ -402,10 +412,14 @@ landmarks, whose fit is always exact, and landmarks on only one half of the cour
 
 `POST /api/matches/{match_id}/players-jobs` queues a players job, with
 `PICKLEBALL_PLAYERS_JOB_TIMEOUT_SECONDS` as its time limit. It is accepted when the
-match has a calibration, no job is active, and no Detect run is complete
-(`Match.players_job_refusal()`, which `can_start_players_job` mirrors). The job
-continues the match's unfinished Detect run, with that run's own calibration and
-configuration rather than the newest calibration, or starts one if there is none.
+match has a calibration, no job is active, and its players are not tracked yet
+(`Match.players_job_refusal()`, which `can_start_players_job` mirrors). Players are
+tracked once a Detect run is complete and the Identify run the match shows read every
+one of its chunks (`Match.players_tracked`). The job continues the match's unfinished
+Detect run, with that run's own calibration and configuration rather than the newest
+calibration, or starts one if there is none. If Detect is complete but Identify never
+read all of it (Identify failed, or the worker died after the last chunk), the job
+runs Identify alone.
 There is no button for it yet, and nothing reaps a players job whose worker was
 killed (see What Is Left).
 
@@ -540,7 +554,8 @@ continue or which calibration to start one with. Then:
    together, before the next one starts. ByteTrack starts afresh at every chunk; its
    lost-track buffer is two seconds of processed frames (30 at 15 Hz), and track ids
    are offset by `chunk index * 1,000,000` so they stay unique.
-5. **Progress** is the share of the steady part done, reported at `court_ready`; the
+5. **Identify** runs after each chunk is committed (see Player Identification).
+6. **Progress** is the share of the steady part done, reported at `court_ready`; the
    job finishes `ready` at `players_ready`.
 
 Each detection row has `frame_number`, `timestamp_ms`, `track_id` (-1 when the person
@@ -558,7 +573,46 @@ result is identical to a run that was never interrupted; a test kills one partwa
 compares. A worker whose model file has a different SHA-256 from the run's refuses to
 continue it (`model_changed`). A different device or library version only logs a
 warning, since the output should match to within a pixel. A job for a match whose Detect run is complete
-finishes at once without detecting anything.
+detects nothing and runs Identify once.
+
+### Player Identification
+
+After each Detect chunk is committed, `_identify` runs
+`pickleball_ml.players.identify.identify` on every chunk of that run finished so far.
+It projects Detect's `image_x`, `image_y` with the match's **newest** calibration (ADR
+0001), keeps Detect's `truncated` as stored, and resolves the players with
+`pickleball_ml.players.identity`. Track ids restart every chunk, so no track crosses a
+chunk boundary, and players are selected chunk by chunk: at most two per side at a
+time, in any number of chains of linked tracklets, so a player away for longer than
+any link (a game break, a walk out of frame) is kept on both sides of the absence.
+Partner assignment runs over the whole period and carries each player's number from
+one chunk to the next, and selection in a finished chunk never changes when another
+is appended. Changeovers are an input,
+empty until they are recorded, so for now a whole match is one period and the
+numbering is wrong after the teams change ends. A changeover past the tracked range
+is ignored.
+
+Each run is a new Identify `ModelRun`: its parent is the Detect run, its
+`calibration_id` the calibration it projected with, its `model_version`
+`pickleball_ml.players.identity@<package version>` (there is no model file), and its
+`config_json` (`IdentifyRunConfig`) the identity settings, `detect_chunks` and
+`tracked_until_seconds` (how far players are tracked: the end of the last chunk read),
+the steady part and its excluded parts copied from the Detect run, and the changeovers
+used, so `config_hash` covers all of it. The run, its Parquet artifact, the match's
+four `players` rows (made on the first run) and `matches.current_identify_run_id` are
+committed together, so the tracks fill in while a long match is still being detected,
+and a worker killed outright still leaves the last Identify run.
+
+The artifact has one row per player per sampled frame (`PlayerTrackPoint` in
+`DATA_MODEL.md`). Numbering is a rule, so the same input always gives the same numbers
+and appending a chunk keeps them: team A (1-2) is the near team at the first resolved
+frame; within a team, the partner in their own left slot at the first frame both are
+resolved is the lower number, or the one seen first if they never are. A slot's left
+and right are the player's own: a far player faces the camera, so their left is
+court +X.
+
+If Identify raises, the job fails with `identify_failed`. The Detect chunks are kept,
+so a new players job continues Detect, or runs Identify alone.
 
 ### Calibration Images
 
@@ -887,6 +941,10 @@ Known gaps in what is here:
 - **Only one camera position is tracked.** One calibration cannot be right on both
   sides of a move, so a players job tracks the steady part holding the calibration's
   image and records the rest as excluded. Nothing tracks the excluded parts yet.
+- **Player tracks are made but not yet used.** Nothing records changeovers, so a whole
+  match is one period and player numbers are wrong after the teams change ends. A
+  recalibration does not re-run Identify by itself; only the next chunk of a running
+  players job picks up the new calibration. No endpoint serves the tracks.
 - **The size limit bounds what is stored more tightly than what is buffered.**
   An upload declaring an oversized `Content-Length` is refused by middleware
   before the body is read, which covers every ordinary client. A chunked
