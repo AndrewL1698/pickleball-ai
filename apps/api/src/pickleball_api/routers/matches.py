@@ -10,6 +10,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -83,6 +84,13 @@ REFERENCE_FRAME_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; sandbox",
     "Content-Disposition": 'inline; filename="reference-frame.jpg"',
+}
+
+#: A playback copy is written once under a random key and never changes, so it
+#: is cached and protected exactly like a reference frame.
+PLAYBACK_HEADERS = {
+    **REFERENCE_FRAME_HEADERS,
+    "Content-Disposition": 'inline; filename="playback.mp4"',
 }
 
 #: Slack left free after an upload, so the disk does not end up at exactly 0.
@@ -283,6 +291,45 @@ def read_reference_frame(
             status.HTTP_404_NOT_FOUND, detail="This calibration image is no longer in storage."
         ) from exc
     return Response(content=content, media_type="image/jpeg", headers=REFERENCE_FRAME_HEADERS)
+
+
+@router.get(
+    "/{match_id}/playback",
+    response_class=FileResponse,
+    responses={
+        200: {"content": {"video/mp4": {}}},
+        206: {"description": "The requested byte range", "content": {"video/mp4": {}}},
+        404: {"description": "No such match, or no playback copy yet"},
+        416: {"description": "The byte range is past the end of the copy"},
+    },
+)
+def read_playback(session: SessionDep, storage: StorageDep, match_id: UUID) -> FileResponse:
+    """The match's H.264 playback copy, for a browser `<video>` to play and seek.
+
+    `Range` requests get `206 Partial Content`, which is how a browser seeks
+    without downloading the whole file; Starlette's `FileResponse` handles them,
+    including `416` for a range past the end. `404` while there is no copy:
+    `playback_available` on the match's video says when there is one.
+    """
+    match = session.get(Match, match_id)
+    video = None if match is None else match.video
+    key = None if video is None else video.playback_storage_key
+    if key is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="This match has no playback copy yet."
+        )
+    try:
+        # `local_path` promises the path only inside the block, and FileResponse
+        # reads it after this returns. That is safe for `LocalFileStorage`, whose
+        # path is the stored file itself. An object store would answer with a
+        # redirect to a signed URL here instead.
+        with storage.local_path(key) as path:
+            pass
+    except ObjectNotFound as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="This match's playback copy is no longer in storage."
+        ) from exc
+    return FileResponse(path, media_type="video/mp4", headers=PLAYBACK_HEADERS)
 
 
 @router.post(

@@ -97,6 +97,7 @@ for (const path of [
   "/api/matches/{match_id}/reference-frame-jobs",
   "/api/matches/{match_id}/reference-frames/{frame_id}",
   "/api/matches/{match_id}/calibrations",
+  "/api/matches/{match_id}/playback",
   "/api/jobs/{job_id}",
 ]) {
   if (!(path in schema.paths)) problems.push(`the API does not serve ${path}`);

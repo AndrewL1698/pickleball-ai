@@ -100,6 +100,10 @@ class VideoRead(BaseModel):
     #: Where sampled frames show the camera moved. Empty means none was found, and
     #: null means not checked. A move and back between two samples would not show.
     camera_jumps: list[CameraJumpRead] | None
+    #: Whether `GET /api/matches/{id}/playback` has an H.264 copy to stream.
+    #: False until the copy is made, and for good if the transcode failed until
+    #: `pbworker-backfill-playback` retries it.
+    playback_available: bool
 
 
 class MatchSummary(BaseModel):

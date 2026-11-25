@@ -28,8 +28,10 @@ moved camera. A `players` job, queued by the first calibration, runs *Detect* (A
 video (see Player Detection). It writes image-space detections only. Identify, which
 turns them into players in court coordinates, is not here yet.
 
-There is no authentication and no video playback yet. The web app that drives this
-API is described in `FRONTEND.md`.
+The preparation job also transcodes an H.264 playback copy of the video
+(`pickleball_worker.playback`), which `GET .../playback` streams with range
+requests. There is no authentication yet. The web app that drives this API is
+described in `FRONTEND.md`.
 
 ## Directory Structure
 
@@ -39,7 +41,7 @@ apps/api/                              # package `pickleball_api`
 ├── Dockerfile                         # shared by the api and worker compose services
 ├── migrations/
 │   ├── env.py                         # reads the URL from settings unless given one
-│   └── versions/                      # 0001 tables, 0002 CHECKs, 0003 matches, 0004 metadata, 0005 stills, 0006 calibrations, 0007 camera check, 0008 model runs, 0009 job kind, 0010 run chunks
+│   └── versions/                      # 0001 tables, 0002 CHECKs, 0003 matches, 0004 metadata, 0005 stills, 0006 calibrations, 0007 camera check, 0008 model runs, 0009 job kind, 0010 run chunks, 0011 playback copy
 ├── src/pickleball_api/
 │   ├── calibration.py                 # fits landmarks through pickleball_ml, or refuses them
 │   ├── config.py                      # typed settings, and the extension allowlist
@@ -63,6 +65,8 @@ apps/api/                              # package `pickleball_api`
 workers/video_processor/               # package `pickleball_worker`
 ├── src/pickleball_worker/
 │   ├── processors.py                  # VideoProcessor, MetadataProcessor, CalibrationPreparationProcessor
+│   ├── playback.py                    # the H.264 playback copy, with the bundled ffmpeg
+│   ├── backfill_playback.py           # `pbworker-backfill-playback`: copies for older videos
 │   ├── players.py                     # players jobs: Detect, chunk by chunk, resumable
 │   ├── job_updates.py                 # a running job's progress and its outcome
 │   ├── tasks.py                       # the RQ task, dispatch by job kind, transaction boundaries
@@ -111,6 +115,7 @@ by importing the function, so the edge really does point one way.
 | `POST` | `/api/matches/{match_id}/metadata-jobs` | Queue a job for a match with no metadata. `202` with the match; `409` if refused; `503` if it cannot be queued |
 | `POST` | `/api/matches/{match_id}/reference-frame-jobs` | Queue a job for a match with metadata but no calibration images. Answers as above |
 | `GET` | `/api/matches/{match_id}/reference-frames/{frame_id}` | One calibration image, as `image/jpeg`. `404` if unknown, under another match, or gone from storage |
+| `GET` | `/api/matches/{match_id}/playback` | The H.264 playback copy, as `video/mp4`, with range requests (`206`, or `416` for a range past the end). `404` if the match is unknown, has no copy yet, or the copy is gone from storage |
 | `POST` | `/api/matches/{match_id}/calibrations` | Fit and save a calibration, and queue a players job for a match never detected. `201` with the match; `409` if refused; `422` with a sentence if the landmarks cannot make a court |
 | `POST` | `/api/matches/{match_id}/players-jobs` | Queue a players job that continues an unfinished Detect run, or starts one. `202` with the match; `409` without a calibration, while a job is active, or once Detect has finished; `503` if it cannot be queued |
 | `GET` | `/api/jobs/{job_id}` | Status, stage, progress, timestamps, failure code, `match_id`. `404` if unknown |
@@ -790,6 +795,9 @@ and tests decode it end to end, expecting metadata and images at 48x64. The proc
 mock `read_metadata` where the processor looks it up
 (`pickleball_worker.processors.read_metadata`). The fake `ftyp` bytes the
 upload tests use are, correctly, *not* decodable; one test relies on that.
+The playback copy is the exception: `test_playback.py` encodes the fixture with
+the ffmpeg that `imageio-ffmpeg` bundles, and probes the result with the same
+binary (H.264, 48x64, no rotation tag, the source's frame count).
 
 The integration tests apply the migrations to a throwaway PostgreSQL database,
 compare the result against the models (catching a model edited without a new
@@ -867,10 +875,11 @@ logged with their traceback and answered with one sentence.
 
 Phase 1 is complete; everything below is later-phase work.
 
-**Video playback, now Phase 5.** Serving uploaded video back to the browser needs
-its own decisions about origin, `Content-Disposition` and `X-Content-Type-Options`;
-an mp4 that is also valid HTML is a stored-XSS vector if it is served from the app's
-own origin. Calibration turned out not to need it.
+**Video playback.** The API serves only the playback copy the worker encoded,
+never the upload itself, with a fixed `video/mp4` type, `nosniff` and a sandbox CSP,
+so an upload that is also valid HTML cannot run from the app's origin. The web
+player is #9. With an object store, the route would redirect to a signed URL
+instead of streaming a local file.
 
 Known gaps in what is here:
 

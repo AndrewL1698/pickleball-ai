@@ -10,11 +10,11 @@ Three separate units of work, for three different reasons:
   a re-run of a job that already reached `ready`, the state machine says no and
   that is the correct answer, not an error.
 
-On success the processor's result -- the video's metadata and the calibration
-images it stored -- is written in the same transaction as the `ready`
-transition, so a job is never `ready` without them and they never appear on a
-job that did not finish. If that write fails, the job is failed instead and the
-stored images are deleted; it does not reach `ready` first.
+On success the processor's result -- the video's metadata, and the calibration
+images and playback copy it stored -- is written in the same transaction as the
+`ready` transition, so a job is never `ready` without them and they never appear
+on a job that did not finish. If that write fails, the job is failed instead and
+the stored files are deleted; it does not reach `ready` first.
 
 The task takes a job id and nothing else. Everything it needs it reads from
 PostgreSQL, so the queue is not a channel through which paths, filenames, or
@@ -23,6 +23,7 @@ job goes to `pickleball_worker.players`, everything else to the processor.
 """
 
 import logging
+from collections.abc import Iterable
 from dataclasses import asdict
 from typing import Any
 from uuid import UUID
@@ -88,18 +89,19 @@ def run_analysis_job(
         return None
 
     try:
-        completed = _complete(identifier, result)
+        unused = _complete(identifier, result)
     except Exception:
         # The result could not be saved -- a constraint refused it, or the
         # database went away. The transaction rolled back, so the job is still
         # `running`; fail it rather than leave it there or call it ready.
         logger.exception("job %s: could not record its result", identifier)
-        _discard_stills(storage, result)
+        _discard_files(storage, result.stored_keys)
         finish_job(identifier, JobStatus.FAILED, error_code=JobErrorCode.INTERNAL)
         return None
-    if not completed:
-        _discard_stills(storage, result)
+    if unused is None:
+        _discard_files(storage, result.stored_keys)
         return None
+    _discard_files(storage, unused)
     logger.info("job %s ready: %s", identifier, result.summary)
     return result.summary
 
@@ -111,10 +113,10 @@ def _kind_of(job_id: UUID) -> JobKind | None:
         return None if job is None else job.kind
 
 
-def _discard_stills(storage: Storage, result: ProcessingResult) -> None:
-    """Delete images no row will ever point at."""
-    for still in result.stills:
-        storage.delete(still.storage_key)
+def _discard_files(storage: Storage, keys: Iterable[str]) -> None:
+    """Delete stored files no row will ever point at."""
+    for key in keys:
+        storage.delete(key)
 
 
 def _claim(job_id: UUID) -> VideoRef | None:
@@ -151,24 +153,28 @@ def _claim(job_id: UUID) -> VideoRef | None:
         )
 
 
-def _complete(job_id: UUID, result: ProcessingResult) -> bool:
+def _complete(job_id: UUID, result: ProcessingResult) -> tuple[str, ...] | None:
     """Save the result and mark the job `ready`, in one transaction.
 
-    Returns False, writing nothing, if the job is no longer this attempt's to
+    Returns None, writing nothing, if the job is no longer this attempt's to
     finish: a terminal job keeps the metadata and verdict it already has.
+    Otherwise returns the stored files the result named that no row took, for
+    the caller to delete once this has committed: a playback copy, when the
+    video already has one (`pbworker-backfill-playback` got there first). An
+    existing copy is never replaced.
     """
     with session_scope() as session:
         job = session.get(AnalysisJob, job_id, with_for_update=True)
         if job is None:
             logger.warning("job %s vanished before it could be finished", job_id)
-            return False
+            return None
         if job.status is not JobStatus.RUNNING:
             logger.warning("job %s is %s; not recording a result for it", job_id, job.status)
-            return False
+            return None
         video = job.match.video
         if video is None:
             transition(job, JobStatus.FAILED, error_code=JobErrorCode.MISSING_VIDEO_FILE)
-            return False
+            return None
         metadata = result.metadata
         video.width = metadata.width
         video.height = metadata.height
@@ -181,6 +187,12 @@ def _complete(job_id: UUID, result: ProcessingResult) -> bool:
         video.camera_jumps = (
             None if result.camera_jumps is None else [asdict(jump) for jump in result.camera_jumps]
         )
+        unused: tuple[str, ...] = ()
+        if result.playback_storage_key is not None:
+            if video.playback_storage_key is None:
+                video.playback_storage_key = result.playback_storage_key
+            else:
+                unused = (result.playback_storage_key,)
         job.match.reference_frames.extend(
             ReferenceFrame(
                 ordinal=ordinal,
@@ -196,4 +208,4 @@ def _complete(job_id: UUID, result: ProcessingResult) -> bool:
         )
         # Also moves the match to `calibration_required`, in this same commit.
         transition(job, JobStatus.READY, stage=JobStage.METADATA_READY)
-        return True
+        return unused

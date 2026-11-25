@@ -64,6 +64,7 @@ export const VIDEO: Video = {
   created_at: "2026-09-23T18:00:52.792390Z",
   metadata: null,
   camera_jumps: null,
+  playback_available: false,
 };
 
 /** A portrait phone clip: stored sideways, tagged 90 degrees, plays 1080x1920. */

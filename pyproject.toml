@@ -61,6 +61,11 @@ module = ["pickleball_ml.ball.wasb_hrnet"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
+# Ships no type information; the worker only calls `get_ffmpeg_exe`.
+module = ["imageio_ffmpeg", "imageio_ffmpeg.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = ["ultralytics", "ultralytics.*", "torch", "torch.*"]
 follow_imports = "skip"
 ignore_missing_imports = true

@@ -2,9 +2,11 @@
 
 import uuid
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from sqlalchemy import Engine
+from test_playback import probe
 
 from pickleball_api import db
 from pickleball_api.errors import JobErrorCode, JobFailure
@@ -20,6 +22,7 @@ from pickleball_api.models import (
 )
 from pickleball_api.storage import LocalFileStorage, Storage, new_storage_key
 from pickleball_api.testing import video_bytes
+from pickleball_worker import playback
 from pickleball_worker.processors import (
     CalibrationPreparationProcessor,
     CameraJump,
@@ -223,6 +226,126 @@ def test_images_from_an_overtaken_attempt_are_deleted(
     assert run_analysis_job(str(job.id), processor=Overtaken(), storage=storage) is None
     assert reference_frames(job.id) == []
     assert not storage.exists(still.storage_key)
+
+
+def test_a_real_video_gets_a_playback_copy_that_plays_like_the_original(
+    stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
+) -> None:
+    """Stored 64x48 and tagged 90 degrees: the copy is 48x64 with no tag at all."""
+    source, job = stored_video
+    run_analysis_job(str(job.id), processor=default_processor(), storage=storage)
+
+    assert reload(job.id).status is JobStatus.READY
+    video = reload_video(job.id)
+    assert video.playback_storage_key is not None
+    assert video.playback_storage_key != source.storage_key
+    with storage.local_path(video.playback_storage_key) as path:
+        copy = probe(path)
+    assert copy.codec == "h264"
+    assert (copy.width, copy.height) == (48, 64)
+    assert copy.rotation_degrees == 0 and not copy.has_display_matrix
+    assert copy.frame_count == video.frame_count == 20
+    assert video.average_fps is not None and video.duration_seconds is not None
+    assert copy.duration_seconds == pytest.approx(video.duration_seconds, abs=1 / video.average_fps)
+
+
+def test_a_failed_transcode_leaves_the_job_ready_without_a_copy(
+    stored_video: tuple[Video, AnalysisJob],
+    storage: LocalFileStorage,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(playback, "ffmpeg_exe", lambda: str(tmp_path / "no-such-ffmpeg"))
+    _, job = stored_video
+    summary = run_analysis_job(str(job.id), processor=default_processor(), storage=storage)
+
+    assert summary is not None and summary["playback_copy"] is False
+    assert reload(job.id).status is JobStatus.READY
+    assert match_status(job.id) is MatchStatus.CALIBRATION_REQUIRED
+    video = reload_video(job.id)
+    assert video.decoded_metadata is not None
+    assert video.playback_storage_key is None
+    assert len(reference_frames(job.id)) == 4
+    assert not list(storage.root.glob("*.mp4.part"))
+
+
+def stored_copy(storage: LocalFileStorage) -> str:
+    key = new_storage_key(".mp4")
+    storage.write(key, [b"mp4"], max_bytes=3)
+    return key
+
+
+def test_a_playback_copy_that_cannot_be_saved_is_deleted_with_the_stills(
+    stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
+) -> None:
+    _, job = stored_video
+    still = stored_still(storage, position_seconds=12.0)  # a background has no position
+    copy = stored_copy(storage)
+
+    class Refused:
+        name, version = "refused", "1"
+
+        def process(
+            self, video: VideoRef, s: Storage, report: ProgressReporter
+        ) -> ProcessingResult:
+            return ProcessingResult(
+                metadata=METADATA, stills=(still,), playback_storage_key=copy
+            )
+
+    assert run_analysis_job(str(job.id), processor=Refused(), storage=storage) is None
+    assert reload(job.id).status is JobStatus.FAILED
+    assert reload_video(job.id).playback_storage_key is None
+    assert not storage.exists(still.storage_key)
+    assert not storage.exists(copy)
+
+
+def test_a_playback_copy_from_an_overtaken_attempt_is_deleted(
+    stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
+) -> None:
+    _, job = stored_video
+    copy = stored_copy(storage)
+
+    class Overtaken:
+        name, version = "overtaken", "1"
+
+        def process(
+            self, video: VideoRef, s: Storage, report: ProgressReporter
+        ) -> ProcessingResult:
+            with db.session_scope() as session:
+                other = session.get(AnalysisJob, job.id)
+                assert other is not None
+                other.status = JobStatus.FAILED
+            return ProcessingResult(metadata=METADATA, playback_storage_key=copy)
+
+    assert run_analysis_job(str(job.id), processor=Overtaken(), storage=storage) is None
+    assert reload_video(job.id).playback_storage_key is None
+    assert not storage.exists(copy)
+
+
+def test_a_video_that_already_has_a_copy_keeps_it(
+    stored_video: tuple[Video, AnalysisJob], storage: LocalFileStorage
+) -> None:
+    """The backfill got there while the job ran: its copy stays, the job's goes."""
+    _, job = stored_video
+    existing, made = stored_copy(storage), stored_copy(storage)
+
+    class Late:
+        name, version = "late", "1"
+
+        def process(
+            self, video: VideoRef, s: Storage, report: ProgressReporter
+        ) -> ProcessingResult:
+            with db.session_scope() as session:
+                row = session.get(Video, video.id)
+                assert row is not None
+                row.playback_storage_key = existing
+            return ProcessingResult(metadata=METADATA, playback_storage_key=made)
+
+    assert run_analysis_job(str(job.id), processor=Late(), storage=storage) is not None
+    assert reload(job.id).status is JobStatus.READY
+    assert reload_video(job.id).playback_storage_key == existing
+    assert storage.exists(existing)
+    assert not storage.exists(made)
 
 
 def test_processed_metadata_is_saved_exactly(

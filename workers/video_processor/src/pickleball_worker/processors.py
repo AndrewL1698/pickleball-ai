@@ -3,8 +3,9 @@
 The default processor reads the video's metadata -- dimensions, rotation,
 average frame rate, duration, frame count, codec -- and writes the stills a
 person places calibration landmarks on, with `pickleball_ml.video.reader`, and
-checks those frames for a moved camera. That is all it does: nothing about play
-is analysed, and no model is loaded. Only the lightweight video and court modules
+checks those frames for a moved camera. Last, it makes the playback copy the
+browser plays (`pickleball_worker.playback`). That is all it does: nothing about
+play is analysed, and no model is loaded. Only the lightweight video and court modules
 are imported, never anything that pulls in torch or YOLO weights.
 
 A processor is handed a `VideoRef`, not the ORM object, and returns a typed
@@ -35,6 +36,7 @@ from pickleball_ml.video.reader import (
     read_metadata,
     sample_frames,
 )
+from pickleball_worker.playback import PlaybackCopyFailed, make_playback_copy
 
 #: Frames in a calibration background, spread across the video. Enough for a
 #: player who stays put for a while to vanish, and few enough to hold in memory
@@ -44,6 +46,11 @@ BACKGROUND_SAMPLES = 25
 #: How many of those are also offered as stills, for a video whose background
 #: is unusable because the camera moved.
 SAMPLE_STILLS = 3
+
+#: How far through the job each step ends. The playback transcode is the slow
+#: part, so it gets most of the bar, from the stills to 0.95.
+SAMPLES_DONE = 0.4
+STILLS_DONE = 0.45
 
 #: Far past any JPEG these can make; the limit is only there because `write` asks.
 MAX_STILL_BYTES = 64 * 1024 * 1024
@@ -116,8 +123,17 @@ class ProcessingResult:
     stills: tuple[StoredStill, ...] = ()
     #: Empty means checked and no move found. None means it could not be checked.
     camera_jumps: tuple[CameraJump, ...] | None = None
+    #: The playback copy, already in storage like the stills. None if it could
+    #: not be made, which does not fail the job.
+    playback_storage_key: str | None = None
     #: A small record for the job log; never shown to a user.
     summary: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def stored_keys(self) -> tuple[str, ...]:
+        """Every file this result put in storage, for deleting if it is not saved."""
+        playback = () if self.playback_storage_key is None else (self.playback_storage_key,)
+        return (*(still.storage_key for still in self.stills), *playback)
 
 
 @runtime_checkable
@@ -189,15 +205,16 @@ class MetadataProcessor:
 
 
 class CalibrationPreparationProcessor:
-    """Metadata, then the stills a person calibrates the court on.
+    """Metadata, the stills a person calibrates the court on, then the playback copy.
 
-    Every job does both, so a match that has finished processing can always be
-    calibrated. A video that yields metadata but not one decodable frame is
-    `unreadable_video`: it could never be calibrated or analysed.
+    Every job does all three, so a match that has finished processing can always
+    be calibrated. A video that yields metadata but not one decodable frame is
+    `unreadable_video`: it could never be calibrated or analysed. A playback copy
+    that cannot be made is not: the job still succeeds, without one.
     """
 
     name = "calibration_preparation"
-    version = "3"
+    version = "4"
 
     def process(
         self, video: VideoRef, storage: Storage, report: ProgressReporter
@@ -209,7 +226,7 @@ class CalibrationPreparationProcessor:
         )
         report(JobStage.INGESTED, 0.1)
         frames = _decode_samples(video, storage, metadata.duration_seconds, report)
-        report(JobStage.INGESTED, 0.8)
+        report(JobStage.INGESTED, SAMPLES_DONE)
 
         camera_jumps = _camera_jumps(frames)
         images = _stills_from(frames)
@@ -217,6 +234,8 @@ class CalibrationPreparationProcessor:
         try:
             for kind, position, count, image in images:
                 stored.append(_store_still(storage, kind, position, count, image))
+            report(JobStage.INGESTED, STILLS_DONE)
+            playback = _playback_copy(video, storage, metadata, report)
         except BaseException:
             for still in stored:
                 storage.delete(still.storage_key)
@@ -226,10 +245,12 @@ class CalibrationPreparationProcessor:
             metadata=metadata,
             stills=tuple(stored),
             camera_jumps=camera_jumps,
+            playback_storage_key=playback,
             summary={
                 "processor": self.name,
                 "processor_version": self.version,
                 "frames_decoded": len(frames),
+                "playback_copy": playback is not None,
             },
         )
 
@@ -247,7 +268,8 @@ def _decode_samples(
         with storage.local_path(video.storage_key) as path:
             for position, image in sample_frames(path, seconds):
                 frames.append((position, image))
-                report(JobStage.INGESTED, 0.1 + 0.7 * len(frames) / BACKGROUND_SAMPLES)
+                done = len(frames) / BACKGROUND_SAMPLES
+                report(JobStage.INGESTED, 0.1 + (SAMPLES_DONE - 0.1) * done)
     except ObjectNotFound as exc:
         raise JobFailure(JobErrorCode.MISSING_VIDEO_FILE, "object not in storage") from exc
     except FileNotFoundError as exc:
@@ -257,6 +279,33 @@ def _decode_samples(
     if not frames:
         raise JobFailure(JobErrorCode.UNREADABLE_VIDEO, "no frame could be decoded")
     return frames
+
+
+def _playback_copy(
+    video: VideoRef, storage: Storage, metadata: ExtractedMetadata, report: ProgressReporter
+) -> str | None:
+    """The playback copy's storage key, or None if it could not be made.
+
+    The copy is for watching, and calibration does not need it, so a failure is
+    logged and the job carries on without one, as `_camera_jumps` does.
+    `pbworker-backfill-playback` retries it.
+    """
+    try:
+        return make_playback_copy(
+            storage,
+            video.storage_key,
+            width=metadata.width,
+            height=metadata.height,
+            duration_seconds=metadata.duration_seconds,
+            report=lambda done: report(
+                JobStage.INGESTED, STILLS_DONE + (0.95 - STILLS_DONE) * done
+            ),
+        )
+    except PlaybackCopyFailed:
+        logger.warning(
+            "playback copy of video %s failed; going on without one", video.id, exc_info=True
+        )
+        return None
 
 
 def _camera_jumps(
