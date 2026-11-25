@@ -172,7 +172,8 @@ def run_players(
     identify_with: IdentifySetup | None = None,
 ) -> Any:
     return run_analysis_job(
-        str(players_job(match_id).id), storage=storage, detect=detect, identify=identify_with
+        str(players_job(match_id).id), storage=storage, detect=detect,
+        identify_with=identify_with,
     )
 
 
@@ -396,8 +397,11 @@ def test_a_job_for_a_match_already_detected_finishes_without_detecting(
     assert players_job(match_id).status is JobStatus.READY
     assert detector.seconds_seen == []
     assert len(detect_runs(match_id)) == 1
-    # Identify runs once more, on the whole Detect run.
-    assert len(identify_runs(match_id)) == 5
+    # Identify runs once more, on the whole Detect run, and numbers everyone the same.
+    runs = identify_runs(match_id)
+    assert len(runs) == 5
+    before, after = (read_run_artifact(storage, run) for run in runs[-2:])
+    pd.testing.assert_frame_equal(before, after)
 
 
 # --- Identify -----------------------------------------------------------------

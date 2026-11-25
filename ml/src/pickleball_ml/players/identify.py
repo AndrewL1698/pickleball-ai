@@ -104,9 +104,9 @@ def identify(
         detections[DETECT_INPUT_COLUMNS], np.asarray(homography, dtype=np.float64)
     )
     used = _changeovers_in_range(rows, changeovers_seconds)
-    players, diagnostics = resolve_identities(
-        rows, config, end_switch_frames=[_first_frame_at(rows, s) for s in used]
-    )
+    # `resolve_identities` predates the glossary: its end switches are changeovers.
+    changeover_frames = [_first_frame_at(rows, s) for s in used]
+    players, diagnostics = resolve_identities(rows, config, end_switch_frames=changeover_frames)
     tracks = (players.rename(columns={"player_id": "player_number"})[PLAYER_TRACK_COLUMNS]
               .astype({"player_number": np.int64, "truncated": bool,
                        "identity_confident": bool}))

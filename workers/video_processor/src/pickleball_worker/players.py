@@ -29,7 +29,7 @@ has to be saved before the next one starts, which is the whole point.
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Any
 from uuid import UUID
@@ -307,8 +307,7 @@ def _run_detect(
                 key = _save_chunk(storage, run_id, chunk)
                 saved += 1
                 # As stored, so a continued run's Identify reads exactly the same rows.
-                with storage.local_path(key) as chunk_path:
-                    detected.append(pd.read_parquet(chunk_path))
+                detected.append(_read_chunk(storage, key))
                 _identify(storage, plan.match_id, run_id, _concat(detected), identify_with, log)
     except (ObjectNotFound, FileNotFoundError) as exc:
         raise JobFailure(JobErrorCode.MISSING_VIDEO_FILE, "video not in storage") from exc
@@ -361,6 +360,15 @@ def _save_chunk(storage: Storage, run_id: UUID, chunk: DetectChunk) -> str:
         return row.storage_key
 
 
+def _read_chunk(storage: Storage, key: str) -> pd.DataFrame:
+    """One chunk just saved, read back for Identify."""
+    try:
+        with storage.local_path(key) as path:
+            return pd.read_parquet(path)
+    except (ObjectNotFound, FileNotFoundError) as exc:
+        raise JobFailure(JobErrorCode.IDENTIFY_FAILED, f"chunk {key} not in storage") from exc
+
+
 def _read_chunks(storage: Storage, run_id: UUID) -> pd.DataFrame:
     """The finished chunks of a Detect run, for Identify."""
     with session_scope() as session:
@@ -411,13 +419,7 @@ def _identify(
     except Exception as exc:
         logger.exception("Identify over run %s failed", detect_run_id)
         raise JobFailure(JobErrorCode.IDENTIFY_FAILED, str(exc)) from exc
-    config = IdentifyRunConfig(
-        identity=inputs.config.identity,
-        detect_chunks=inputs.config.detect_chunks,
-        tracked_until_seconds=inputs.config.tracked_until_seconds,
-        steady_part=inputs.config.steady_part,
-        changeovers_seconds=result.changeovers_seconds,
-    )
+    config = replace(inputs.config, changeovers_seconds=result.changeovers_seconds)
 
     with session_scope() as session:
         match = session.get(Match, match_id, with_for_update=True)

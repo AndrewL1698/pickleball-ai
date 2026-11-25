@@ -35,7 +35,7 @@ that survived the changeover. Player identity and team (A/B) persist across the
 window; side (near/far) and slot are per frame.
 
 Numbering follows a rule, so the same input always gives the same numbers: team
-A (players 1-2) is the near team of the first game segment, and within a team the
+A (players 1-2) is the near team of the first period, and within a team the
 partner in their own left slot, at the first frame both partners are resolved,
 is the lower number (1 or 3). Partners never resolved at the same time are
 numbered by who was seen first. Left and right are each player's own, facing the
@@ -95,8 +95,8 @@ class IdentityConfig:
     appearance_change_window: int = 15  # rows averaged on each side of a candidate split
     appearance_change_threshold: float = 0.45  # ~99.5th percentile within tracks on test clip
     max_gap_s: float = 30.0
-    # In samples, not video frames: how far one tracklet may overlap the next in a chain.
-    max_overlap_frames: int = 2
+    # How many samples one tracklet may overlap the next in a chain.
+    max_overlap_samples: int = 2
     # Selection: frames inside this area earn full reward; outside it people are rarely players.
     reward_area: PlayArea = field(default_factory=lambda: PlayArea(4.0, 10.0, 5.0))
     outside_reward: float = 0.05
@@ -273,7 +273,7 @@ def _gap_s(a: Tracklet, b: Tracklet, period_s: float) -> float:
 def motion(a: Tracklet, b: Tracklet, period_s: float, config: IdentityConfig) -> float | None:
     """Normalized displacement from the end of `a` to the start of `b`; None if impossible."""
     gap_samples = b.start_sample - a.end_sample
-    if gap_samples <= 0 and -gap_samples > config.max_overlap_frames:
+    if gap_samples <= 0 and -gap_samples > config.max_overlap_samples:
         return None
     gap_s = _gap_s(a, b, period_s)
     if gap_s > config.max_gap_s:
@@ -323,7 +323,7 @@ def select_players(
 
 @dataclass(frozen=True)
 class _Interval:
-    """A stretch of samples on one half during which the set of selected tracklets is fixed."""
+    """A stretch of samples on one side during which the set of selected tracklets is fixed."""
 
     tracklets: tuple[Tracklet, ...]
     frames: tuple[int, ...]  # rows of each tracklet inside this interval
@@ -340,7 +340,7 @@ def assign_partners(
     selected: list[Tracklet], samples_by_tracklet: dict[int, np.ndarray], period_s: float,
     config: IdentityConfig,
 ) -> PartnerAssignment:
-    """Decide which of the two partners each selected tracklet on one half belongs to.
+    """Decide which of the two partners each selected tracklet on one side belongs to.
 
     `samples_by_tracklet` holds each tracklet's sorted `sample` values.
     """
@@ -724,7 +724,7 @@ def _resolve_game(
 def _number_partners(
     rows: pd.DataFrame, selected: list[Tracklet], label_of: dict[int, int], side: str
 ) -> list[int]:
-    """The two partner labels of one half, lower player number first.
+    """The two partner labels of one side, lower player number first.
 
     The partner in their own left slot at the first frame where both partners are
     resolved comes first; partners never resolved together are ordered by who was
@@ -762,7 +762,7 @@ def _own_x(court_x: float | np.ndarray, side: str | np.ndarray) -> Any:
 def _assign_slots(players: pd.DataFrame) -> pd.Series:
     """Side plus left/right from each player's own point of view, facing the net.
 
-    Of two partners on a half, the one further to their own left is left. A lone
+    Of two partners on a side, the one further to their own left is left. A lone
     player is assigned by which side of the center line they stand.
     """
     own_x = pd.Series(_own_x(players["smooth_x"].to_numpy(), players["side"].to_numpy()),

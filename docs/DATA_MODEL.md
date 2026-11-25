@@ -192,7 +192,7 @@ side                 # near / far at this frame
 slot                 # side + left / right from the player's own point of view (near_left, far_right, ...)
 track_id             # raw tracker ID, unique within the Detect run (chunk * 1,000,000 + ByteTrack's id)
 segment_id           # track split where position, box size, or clothing color jumps
-tracklet_id          # segment cut where another segment on the same half starts or ends
+tracklet_id          # segment cut where another segment on the same side starts or ends
 x1                   # box, image pixels
 y1
 x2

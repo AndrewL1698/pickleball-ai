@@ -63,19 +63,19 @@ def run_analysis_job(
     storage: Storage | None = None,
     settings: Settings | None = None,
     detect: DetectSetup | None = None,
-    identify: IdentifySetup | None = None,
+    identify_with: IdentifySetup | None = None,
 ) -> dict[str, Any] | None:
     """Run one analysis job to a terminal status.
 
     The optional arguments exist for tests; RQ calls this with the id alone.
-    `processor` runs a preparation job, and `detect` and `identify` a players job.
+    `processor` runs a preparation job, and `detect` and `identify_with` a players job.
     """
     settings = settings or get_settings()
     storage = storage or LocalFileStorage(settings.upload_dir)
     identifier = UUID(job_id)
     if _kind_of(identifier) is JobKind.PLAYERS:
         return run_players_job(
-            identifier, storage, detect or default_detect_setup(settings), identify
+            identifier, storage, detect or default_detect_setup(settings), identify_with
         )
     processor = processor or default_processor()
 

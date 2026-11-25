@@ -424,7 +424,9 @@ class Match(Base):
         """Detect has finished, and the Identify run shown read every chunk of it.
 
         Identify runs after each Detect chunk, so an Identify run that read only the
-        earlier chunks can be shown while the last one failed.
+        earlier chunks can be shown while the last one failed. `detect_chunks` is
+        written by `pickleball_ml.players.identify.IdentifyRunConfig`; the worker's
+        tests run the two together.
         """
         detect = self.complete_detect_run
         shown = self.current_identify_run
