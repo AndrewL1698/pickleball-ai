@@ -116,6 +116,25 @@ def test_tracks_are_linked_across_a_chunk_boundary() -> None:
     assert number_of_colour(tracks, frame) == {1: {1}, 2: {2}, 3: {3}, 4: {4}}
 
 
+def test_a_player_away_longer_than_any_link_is_kept_on_both_sides_of_the_absence() -> None:
+    """Selection allows `players_per_side` chains of linked tracklets, and a chain breaks
+    where a player is away for longer than `max_gap_s` (a game break, a walk out of
+    frame). Over a whole match that happens to everyone, so chains are selected per
+    Detect chunk, which no track crosses: here the far-left player is away from 280 s to
+    400 s, across the boundary at 300 s, and is still kept before and after."""
+    frame = detections(
+        stand(1, 0, 300, (-5, -15), 1), stand(2, 0, 300, (5, -15), 2),
+        stand(3, 0, 300, (5, 12), 3), stand(4, 0, 280, (-5, 12), 4),
+        stand(1, 300, 600, (-5, -15), 1, chunk=1), stand(2, 300, 600, (5, -15), 2, chunk=1),
+        stand(3, 300, 600, (5, 12), 3, chunk=1), stand(4, 400, 600, (-5, 12), 4, chunk=1),
+    )
+    tracks = run(frame)
+    per_track = tracks.groupby("track_id").size()
+    assert per_track[4] == 280 * RATE_HZ
+    assert per_track[TRACK_ID_STRIDE + 4] == 200 * RATE_HZ
+    assert number_of_colour(tracks, frame) == {1: {1}, 2: {2}, 3: {3}, 4: {4}}
+
+
 def test_appending_a_chunk_keeps_the_player_numbers() -> None:
     """Identify re-runs on everything Detect has finished each time a chunk is added.
     In the second chunk the partners of each team have swapped slots (as after a serve

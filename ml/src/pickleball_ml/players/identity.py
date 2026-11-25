@@ -70,7 +70,7 @@ COST_SCALE = 100  # network simplex needs integer costs
 SIDES = ("near", "far")
 INF = float("inf")
 
-#: Columns `resolve_identities` reads.
+#: Columns `resolve_identities` reads. `selection_block` is optional; see `resolve_identities`.
 INPUT_COLUMNS = [
     "frame_number", "timestamp_ms", "track_id", "x1", "y1", "x2", "y2", "confidence",
     "image_x", "image_y", "court_x", "court_y", "truncated", "appearance",
@@ -101,6 +101,11 @@ class IdentityConfig:
     reward_area: PlayArea = field(default_factory=lambda: PlayArea(4.0, 10.0, 5.0))
     outside_reward: float = 0.05
     selection_motion_weight: float = 2.0
+    # Selection: starting a chain of tracklets costs this many frames of reward. More than
+    # the dearest plausible link (`selection_motion_weight` times about 2.5), so a link is
+    # preferred, and enough to ignore a flicker; a player back after a long absence, whom
+    # no link can reach, is a new chain.
+    chain_start_cost: float = 10.0
     # Assignment costs are in "frames of clothing evidence": a frame whose color is as far
     # from one partner's profile as from the other adds 0 difference.
     assignment_motion_weight: float = 10.0
@@ -138,6 +143,8 @@ class Tracklet:
     end_xy: tuple[float, float]
     appearance: Descriptor | None
     reward: float
+    #: The input's `selection_block`, or 0 without one.
+    block: int = 0
 
 
 def split_tracklets(detections: pd.DataFrame, config: IdentityConfig) -> pd.DataFrame:
@@ -261,6 +268,7 @@ def summarize_tracklets(rows: pd.DataFrame, config: IdentityConfig) -> list[Trac
             end_xy=(float(np.median(xs[-ends:])), float(np.median(ys[-ends:]))),
             appearance=mean_descriptor(descriptors),
             reward=float(np.where(inside, 1.0, config.outside_reward).sum()),
+            block=int(group["selection_block"].iloc[0]) if "selection_block" in group else 0,
         ))
     return tracklets
 
@@ -288,19 +296,33 @@ def motion(a: Tracklet, b: Tracklet, period_s: float, config: IdentityConfig) ->
 def select_players(
     tracklets: list[Tracklet], period_s: float, config: IdentityConfig
 ) -> list[Tracklet]:
-    """Tracklets on one half chosen as players: max coverage minus link cost, at most
-    `players_per_side` at a time (min-cost flow over tracklet chains)."""
+    """Tracklets on one side chosen as players: max coverage minus link and chain-start
+    costs, at most `players_per_side` at a time (min-cost flow over tracklet chains).
+
+    Each of the `players_per_side` units of flow runs along a timeline of the
+    tracklets' start and end samples, and can leave it to follow a chain of linked
+    tracklets and rejoin it after the chain's last sample. So a unit is in at most one
+    tracklet at a time, but may follow any number of chains one after another: a
+    player away for longer than `max_gap_s`, whom no link can reach, starts a new one.
+    """
     k = config.players_per_side
     graph: nx.DiGraph[Any] = nx.DiGraph()
     graph.add_node("S", demand=-k)
     graph.add_node("T", demand=k)
-    graph.add_edge("S", "T", capacity=k, weight=0)
     ordered = sorted(tracklets, key=lambda t: (t.start_sample, t.tracklet_id))
+    events = sorted({t.start_sample for t in ordered} | {t.end_sample + 1 for t in ordered})
+    previous: Any = "S"
+    for event in events:
+        graph.add_edge(previous, ("t", event), capacity=k, weight=0)
+        previous = ("t", event)
+    graph.add_edge(previous, "T", capacity=k, weight=0)
+    start_cost = round(config.chain_start_cost * COST_SCALE)
     for t in ordered:
-        graph.add_edge("S", ("in", t.tracklet_id), capacity=1, weight=0)
+        graph.add_edge(("t", t.start_sample), ("in", t.tracklet_id), capacity=1,
+                       weight=start_cost)
         graph.add_edge(("in", t.tracklet_id), ("out", t.tracklet_id), capacity=1,
                        weight=-round(t.reward * COST_SCALE))
-        graph.add_edge(("out", t.tracklet_id), "T", capacity=1, weight=0)
+        graph.add_edge(("out", t.tracklet_id), ("t", t.end_sample + 1), capacity=1, weight=0)
     starts = np.array([t.start_sample for t in ordered])
     start_times = np.array([t.start_s for t in ordered])
     for a in ordered:
@@ -527,6 +549,13 @@ def resolve_identities(
     Rows with `track_id` -1 are ignored. `end_switch_frames` are frames where the
     teams have changed ends (a game boundary). Player IDs 1-2 are team A, the near
     team at the start of the window; 3-4 are team B.
+
+    Selection finds at most `players_per_side` chains of linked tracklets per side,
+    and a chain breaks wherever a player is away for longer than `max_gap_s`. That is
+    rare in a few minutes of play and certain over a whole match, so a long input
+    carries a `selection_block` column (rows of one track share a block) and players
+    are selected block by block. Partner assignment and numbering still run over the
+    whole game segment, so a player keeps their number from one block to the next.
     """
     bounds = _game_bounds(detections, end_switch_frames)
     games: list[tuple[pd.DataFrame, dict[str, Any], dict[int, Descriptor | None],
@@ -687,7 +716,11 @@ def _resolve_game(
     diagnostics: dict[str, Any] = {"tracklets": len(tracklets)}
     for side_index, side in enumerate(SIDES):
         side_tracklets = [t for t in tracklets if t.side == side]
-        selected = select_players(side_tracklets, period_s, config)
+        # Selection allows `players_per_side` chains per block, and a chain breaks where a
+        # player is away for longer than `max_gap_s`; see `resolve_identities`.
+        selected = [chosen for block in sorted({t.block for t in side_tracklets})
+                    for chosen in select_players([t for t in side_tracklets if t.block == block],
+                                                 period_s, config)]
         assignment = assign_partners(selected, samples_by_tracklet, period_s, config)
         order = _number_partners(rows, selected, assignment.label, side)
         base = 1 + side_index * config.players_per_side

@@ -7,8 +7,9 @@ given (the match's newest), then resolves who is who with
 takes about an hour, so it re-runs on everything Detect has finished whenever a
 chunk is added, after a recalibration, or after a correction.
 
-Track ids restart in every Detect chunk, so every track ends at a chunk boundary;
-selection links tracks across it by motion, as it does any broken track.
+Track ids restart in every Detect chunk, so every track ends at a chunk boundary.
+Players are selected chunk by chunk (`selection_block`), and partner assignment over
+the whole period carries each player's number from one chunk to the next.
 
 The output rows are `PlayerTrackPoint`s (`docs/DATA_MODEL.md`). They carry
 `player_number` (1-4), not a database id, so this package stays free of the
@@ -25,6 +26,7 @@ import pandas as pd
 
 from pickleball_ml.court.geometry import FloatArray
 from pickleball_ml.players.court_position import project_ground_contact
+from pickleball_ml.players.detect import TRACK_ID_STRIDE
 from pickleball_ml.players.identity import IdentityConfig, resolve_identities
 
 #: What a Detect row must carry for Identify.
@@ -103,6 +105,9 @@ def identify(
     rows = project_ground_contact(
         detections[DETECT_INPUT_COLUMNS], np.asarray(homography, dtype=np.float64)
     )
+    # Players are selected chunk by chunk: no track crosses a chunk boundary, and
+    # selection over a whole match would lose everyone who is ever away for long.
+    rows["selection_block"] = rows["track_id"] // TRACK_ID_STRIDE
     used = _changeovers_in_range(rows, changeovers_seconds)
     # `resolve_identities` predates the glossary: its end switches are changeovers.
     changeover_frames = [_first_frame_at(rows, s) for s in used]

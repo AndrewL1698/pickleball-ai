@@ -381,3 +381,21 @@ def test_sample_gaps_of_varying_length_keep_a_player_whole() -> None:
     one = players[players["track_id"] == 1]
     assert len(one) == len(frames)
     assert one["player_id"].nunique() == 1
+
+
+def test_a_player_away_longer_than_any_link_is_kept_before_and_after() -> None:
+    """Over a whole match, every player is sometimes away for longer than `max_gap_s`
+    (a game break, a walk out of frame), so no chain of links can cover them. Selection
+    must still keep them on both sides of the absence: at most two at a time, not two
+    chains in all."""
+    frames = range(0, 6000, STRIDE)  # 100 s
+    rows = (walk(1, frames, (-5, -15), (-5, -15), shirt=1)
+            + walk(2, frames, (5, -15), (5, -15), shirt=2)
+            + walk(3, frames, (5, 12), (5, 12), shirt=3)
+            + walk(4, range(0, 1200, STRIDE), (-5, 12), (-5, 12), shirt=4)
+            # Away for 50 s, then back with a new track id.
+            + walk(5, range(4200, 6000, STRIDE), (-5, 12), (-5, 12), shirt=4))
+    players = resolve(rows)
+    kept = players.groupby("track_id").size()
+    assert kept[4] == 600 and kept[5] == 900
+    assert numbers(players)[4] == numbers(players)[5]
