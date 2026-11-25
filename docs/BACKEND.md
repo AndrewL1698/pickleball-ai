@@ -581,8 +581,13 @@ After each Detect chunk is committed, `_identify` runs
 `pickleball_ml.players.identify.identify` on every chunk of that run finished so far.
 It projects Detect's `image_x`, `image_y` with the match's **newest** calibration (ADR
 0001), keeps Detect's `truncated` as stored, and resolves the players with
-`pickleball_ml.players.identity`: track ids restart every chunk, so every track ends
-at a chunk boundary and is linked across it by motion. Changeovers are an input,
+`pickleball_ml.players.identity`. Track ids restart every chunk, so no track crosses a
+chunk boundary, and players are selected chunk by chunk: at most two per side at a
+time, in any number of chains of linked tracklets, so a player away for longer than
+any link (a game break, a walk out of frame) is kept on both sides of the absence.
+Partner assignment runs over the whole period and carries each player's number from
+one chunk to the next, and selection in a finished chunk never changes when another
+is appended. Changeovers are an input,
 empty until they are recorded, so for now a whole match is one period and the
 numbering is wrong after the teams change ends. A changeover past the tracked range
 is ignored.
