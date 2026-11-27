@@ -465,6 +465,10 @@ class Video(Base):
     camera_jumps: Mapped[list[dict[str, float]] | None] = mapped_column(
         JSON(none_as_null=True), default=None
     )
+    #: The H.264 MP4 the browser plays, made by the preparation job or by
+    #: `pbworker-backfill-playback`. Null means not made yet, including when the
+    #: transcode failed. Never exposed: the API says only whether there is one.
+    playback_storage_key: Mapped[str | None] = mapped_column(String(512), default=None)
 
     match: Mapped[Match] = relationship(back_populates="video")
 
@@ -473,6 +477,8 @@ class Video(Base):
         # One video per match for the MVP. Dropping this constraint is the
         # whole migration if a match ever needs a second camera.
         UniqueConstraint("match_id", name="uq_videos_match_id"),
+        # A copy belongs to one video, as `storage_key` does.
+        UniqueConstraint("playback_storage_key", name="uq_videos_playback_storage_key"),
         # Each value is valid on its own terms, and null is always allowed...
         CheckConstraint("width IS NULL OR width > 0", name="ck_videos_width_positive"),
         CheckConstraint("height IS NULL OR height > 0", name="ck_videos_height_positive"),
@@ -503,6 +509,11 @@ class Video(Base):
             name="ck_videos_metadata_complete",
         ),
     )
+
+    @property
+    def playback_available(self) -> bool:
+        """Whether there is a playback copy, without saying where it is."""
+        return self.playback_storage_key is not None
 
     @property
     def decoded_metadata(self) -> DecodedVideoMetadata | None:

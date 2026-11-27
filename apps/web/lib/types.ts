@@ -110,6 +110,8 @@ export interface Video {
   metadata: VideoMetadata | null;
   /** Empty means checked and no move found. Null means not checked. */
   camera_jumps: CameraJump[] | null;
+  /** Whether `/api/matches/{id}/playback` has an H.264 copy to stream. */
+  playback_available: boolean;
 }
 
 /** How a calibration image was made. */

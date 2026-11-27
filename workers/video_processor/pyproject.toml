@@ -8,6 +8,7 @@ requires-python = ">=3.13,<3.14"
 # with the API) stays torch-free. The dependency points one way, worker -> ml;
 # nothing in ml imports the worker or the API.
 dependencies = [
+    "imageio-ffmpeg>=0.8.1",
     "pickleball-api",
     "pickleball-ml",
     "rq>=2",
@@ -21,6 +22,7 @@ tracking = ["pickleball-ml[tracking]"]
 
 [project.scripts]
 pbworker = "pickleball_worker.__main__:main"
+pbworker-backfill-playback = "pickleball_worker.backfill_playback:main"
 
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]

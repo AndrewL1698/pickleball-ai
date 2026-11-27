@@ -208,6 +208,21 @@ before it stays not checked unless it is uploaded again. Migrations 0009 and 001
 the job's `kind` and the chunks of a Detect run, and queue nothing: an already
 calibrated match gets its players job from `POST .../players-jobs`.
 
+Each preparation job also makes a playback copy of the video: an H.264 MP4, 720p
+or the source size if smaller, that every browser can play and seek. The match's
+`video.playback_available` says whether there is one, and
+`GET /api/matches/<match_id>/playback` streams it with range requests (`404` while
+there is none). If the transcode fails the job still finishes, without a copy.
+ffmpeg comes from the worker's `imageio-ffmpeg` dependency, so there is nothing to
+install. Migration 0011 adds the copy's column and makes nothing. For videos
+processed before it, and to retry a failed transcode, run once with the database up:
+
+```bash
+uv run pbworker-backfill-playback   # inline, one video at a time; skips videos already done
+```
+
+It queues no jobs, logs a line per video, and exits non-zero if any copy failed.
+
 The API and the base worker import OpenCV (through `pickleball_ml.video` and
 `pickleball_ml.court.geometry`) but not torch: both depend on `pickleball-ml`
 without its `tracking` extra, so the Docker image stays torch-free. The worker
